@@ -1,0 +1,13 @@
+pyutorch-lightning
+lightning
+opencv
+addict
+scipy
+shapely
+matplotlib
+sklearn
+rtree
+fvcore
+cloudpickle
+omegaconf
+pycocotools

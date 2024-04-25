@@ -3,3 +3,5 @@ cityscale
 *.pyc
 *.lprof
 *.png
+sam_ckpts/
+wandb/
