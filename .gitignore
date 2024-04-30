@@ -5,3 +5,6 @@ cityscale
 *.png
 sam_ckpts/
 wandb/
+lightning_logs/
+save/
+segment_*/

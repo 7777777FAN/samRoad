@@ -55,8 +55,8 @@ if __name__ == "__main__":
 
 
     # Good when model architecture/input shape are fixed.
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True   # 告诉pytorch针对固定大小的输入使用同样的高效卷积算法
+    torch.backends.cudnn.enabled = True     # 启用cudnn，这是默认的
     
 
     net = SAMRoad(config)

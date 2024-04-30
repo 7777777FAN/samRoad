@@ -11,3 +11,6 @@ fvcore
 cloudpickle
 omegaconf
 pycocotools
+tcod
+scikit-image
+imageio

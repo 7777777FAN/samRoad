@@ -9,6 +9,7 @@ import cv2
 IMAGE_SIZE = 2048
 KEYPOINT_RADIUS = 3
 ROAD_WIDTH = 3
+# ROAD_WIDTH = 2
 output_dir = './processed'
 
 def create_directory(dir,delete=False):

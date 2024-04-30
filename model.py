@@ -217,9 +217,9 @@ class SAMRoad(pl.LightningModule):
             
         prompt_embed_dim = 256
         # SAM default is 1024
-        image_size = config.PATCH_SIZE
+        image_size = config.PATCH_SIZE  # 从sam的1024改到512
         self.image_size = image_size
-        vit_patch_size = 16
+        vit_patch_size = 16 # 每个tile打成16×16不重叠的patch
         image_embedding_size = image_size // vit_patch_size
 
         encoder_output_dim = prompt_embed_dim

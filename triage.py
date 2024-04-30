@@ -14,6 +14,7 @@ def visualize_image_and_graph(img, nodes, edges, viz_img_size=512):
     # Resize the image to the specified visualization size, RGB->BGR
     img = cv2.resize(img, (viz_img_size, viz_img_size))
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    # img = np.zeros((viz_img_size, viz_img_size))
 
     # Draw edges
     for edge in edges:
@@ -23,6 +24,7 @@ def visualize_image_and_graph(img, nodes, edges, viz_img_size=512):
             img,
             (int(start_node[0]), int(start_node[1])),
             (int(end_node[0]), int(end_node[1])),
+            # 255,
             (15, 160, 253),
             4,
         )
