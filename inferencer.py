@@ -119,7 +119,7 @@ def infer_one_img(net, img, config):
     
     ## Extract sample points from masks
     graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
-    if graph_points.shape[0] == 0:
+    if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
         return graph_points, np.zeros((0, 2), dtype=np.int32)
 
     # for box query
@@ -270,13 +270,18 @@ if __name__ == "__main__":
     
     total_inference_seconds = 0.0
 
+    num_processd = 0
     for img_id in test_img_indices:
         print(f'Processing {img_id}')
         # [H, W, C] RGB
         img = read_rgb_img(rgb_pattern.format(img_id))
         start_seconds = time.time()
         # coords in (r, c)
-        pred_nodes, pred_edges, itsc_mask, road_mask = infer_one_img(net, img, config)
+        try:
+            pred_nodes, pred_edges, itsc_mask, road_mask = infer_one_img(net, img, config)
+        except Exception as e:
+            print(f"Error happens, which may due to no point were extracted! img: {img_id}")
+            continue
         end_seconds = time.time()
         total_inference_seconds += (end_seconds - start_seconds)
 
@@ -340,6 +345,7 @@ if __name__ == "__main__":
         with open(graph_save_path, 'wb') as file:
             pickle.dump(large_map_sat2graph_format, file)
         
+        num_processd += 1
         print(f'Done for {img_id}.')
     
     # log inference time

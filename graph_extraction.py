@@ -22,9 +22,9 @@ def read_rgb_img(path):
 
 # returns (x, y)
 def get_points_and_scores_from_mask(mask, threshold):
-    rcs = np.column_stack(np.where(mask > threshold))
-    xys = rcs[:, ::-1]
-    scores = mask[mask > threshold]
+    rcs = np.column_stack(np.where(mask > threshold))   # 把分别存储了非零值所在位置的行和列坐标的数组转换为列后叠成矩阵，这样每一行就是rc
+    xys = rcs[:, ::-1]  # 调换rc成为xy
+    scores = mask[mask > threshold]     # 非0值的列表
     return xys, scores
 
 

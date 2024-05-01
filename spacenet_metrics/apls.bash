@@ -1,7 +1,8 @@
 declare -a arr=( $(jq -r '.test[]' ../spacenet/data_split.json) )
 
 # source directory
-dir=$1
+# dir=$1
+dir=save/infer__20240501_164759
 data_dir='spacenet'
 mkdir -p ../$dir/results/apls
 
@@ -19,4 +20,5 @@ do
         /usr/local/go/bin/go run ./apls/main.go gt.json prop.json ../$dir/results/apls/$i.txt  spacenet
     fi
 done
+
 python apls.py --dir $dir

@@ -571,9 +571,9 @@ def subdivide_graph(graph, resolution):
         
 def nms_points(points, scores, radius, return_indices=False):
     # if score > 1.0, the point is forced to be kept regardless
-    sorted_indices = np.argsort(scores)[::-1]
-    sorted_points = points[sorted_indices, :]
-    sorted_scores = scores[sorted_indices]
+    sorted_indices = np.argsort(scores)[::-1]   # 默认从小到大排序
+    sorted_points = points[sorted_indices, :]   # 点坐标 组成的矩阵
+    sorted_scores = scores[sorted_indices]      # 大于thr的分数 组成的列表
     kept = np.ones(sorted_indices.shape[0], dtype=bool)
     tree = scipy.spatial.KDTree(sorted_points)
     for idx, p in enumerate(sorted_points):
@@ -582,9 +582,10 @@ def nms_points(points, scores, radius, return_indices=False):
         # neighbor_indices = tree.query_radius(p[np.newaxis, :], r=radius)[0]
         neighbor_indices = tree.query_ball_point(p, r=radius)
         neighbor_scores = sorted_scores[neighbor_indices]
-        keep_nbr = np.greater(neighbor_scores, 1.0)
+        keep_nbr = np.greater(neighbor_scores, 1.0)     # 等价于keep_nbr = neighbor_scores > 1.0    # 这里是相当于把当前点周围的点的保留值设为False，因为这些点的score不可能大于1.0
+        
         kept[neighbor_indices] = keep_nbr
-        kept[idx] = True
+        kept[idx] = True    # 这一句貌似有点多余
     if return_indices:
         return sorted_points[kept], sorted_indices[kept]
     else:
