@@ -54,11 +54,12 @@ def spacenet_data_partition():
 
 
 def get_patch_info_one_img(image_index, image_size, sample_margin, patch_size, patches_per_edge):
+    '''获取对一张大影像的裁剪信息, 具体为小patch左上、右下顶点坐标'''
     patch_info = []
     sample_min = sample_margin
     sample_max = image_size - (patch_size + sample_margin)
     eval_samples = np.linspace(start=sample_min, stop=sample_max, num=patches_per_edge)
-    eval_samples = [round(x) for x in eval_samples]
+    eval_samples = [round(x) for x in eval_samples]     # round不传递位数时取整
     for x in eval_samples:
         for y in eval_samples:
             patch_info.append(
@@ -79,7 +80,7 @@ class GraphLabelGenerator():
         # subdivide version
         # TODO: check proper resolution
         self.subdivide_resolution = 4
-        self.full_graph_subdivide = graph_utils.subdivide_graph(self.full_graph_origin, self.subdivide_resolution)
+        self.full_graph_subdivide = graph_utils.subdivide_graph(self.full_graph_origin, self.subdivide_resolution) # 将每条边分成4段，密集化
         # np array, maybe faster
         self.subdivide_points = np.array(self.full_graph_subdivide.vs['point'])
         # pre-build spatial index
@@ -96,9 +97,9 @@ class GraphLabelGenerator():
         crossover_exclude_radius = 4
         exclude_indices = set()
         for p in self.crossover_points:
-            nearby_indices = self.graph_kdtree.query_ball_point(p, crossover_exclude_radius)
+            nearby_indices = self.graph_kdtree.query_ball_point(p, crossover_exclude_radius)    # 查找crossover点周围4个像素的所有点
             exclude_indices.update(nearby_indices)
-        self.exclude_indices = exclude_indices
+        self.exclude_indices = exclude_indices  # 把这些点的索引记下来，后续需要排除在外
 
         # Find intersection points, these will always be kept in nms
         itsc_indices = set()
@@ -111,6 +112,7 @@ class GraphLabelGenerator():
 
         # Points near crossover and intersections are interesting.
         # they will be more frequently sampled
+        # 交汇点和横跨点周边的点具备更值得关注，相比于直路上的点，这些点极度影响拓扑
         interesting_indices = set()
         interesting_radius = 32
         # near itsc
@@ -126,8 +128,9 @@ class GraphLabelGenerator():
     
     def sample_patch(self, patch, rot_index = 0):
         (x0, y0), (x1, y1) = patch
-        query_box = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        patch_indices_all = set(self.graph_rtee.intersection(query_box))
+        query_box = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))    # 找到目标矩形的范围（左上、右下）
+        patch_indices_all = set(self.graph_rtee.intersection(query_box))    # 哪些点在这个patch内，注意这里的self.graph_rtee是点的rtree索引
+        # 注意这里的图是经过密集化的，不然不足以模拟测试时密集的采样带你的情况
         patch_indices = patch_indices_all - self.exclude_indices
 
         # Use NMS to downsample, params shall resemble inference time
@@ -146,9 +149,9 @@ class GraphLabelGenerator():
         # random scores to emulate different random configurations that all share a
         # similar spacing between sampled points
         # raise scores for intersction points so they are always kept
-        nms_scores = np.random.uniform(low=0.9, high=1.0, size=patch_indices.shape[0])
+        nms_scores = np.random.uniform(low=0.9, high=1.0, size=patch_indices.shape[0])  # 为每个采样点赋置信度（不简单地赋值为1）
         nms_score_override = self.nms_score_override[patch_indices]
-        nms_scores = np.maximum(nms_scores, nms_score_override)
+        nms_scores = np.maximum(nms_scores, nms_score_override)     # 挑出两个数组对应位置的最大值组成新数组
         nms_radius = self.config.ROAD_NMS_RADIUS
         
         # kept_indces are into the patch_points array
@@ -163,7 +166,7 @@ class GraphLabelGenerator():
         # indices into the nmsed points in the patch
         sample_indices_in_nmsed = np.random.choice(
             np.arange(start=0, stop=nmsed_points.shape[0], dtype=np.int32),
-            size=sample_num, replace=True, p=sample_weights / np.sum(sample_weights))
+            size=sample_num, replace=True, p=sample_weights / np.sum(sample_weights))   # replace表示是否允许有放回采样
         # indices into the subdivided graph
         sample_indices = nmsed_indices[sample_indices_in_nmsed]
         
@@ -173,14 +176,16 @@ class GraphLabelGenerator():
         sampled_points = self.subdivide_points[sample_indices, :]
         # [n_sample, n_nbr]
         # k+1 because the nearest one is always self
-        knn_d, knn_idx = nmsed_kdtree.query(sampled_points, k=max_nbr_queries + 1, distance_upper_bound=radius)
+        knn_d, knn_idx = nmsed_kdtree.query(sampled_points, k=max_nbr_queries + 1, distance_upper_bound=radius) # +1是为了包含自身
 
 
         samples = []
 
         for i in range(sample_num):
-            source_node = sample_indices[i]
-            valid_nbr_indices = knn_idx[i, knn_idx[i, :] < nmsed_point_num]
+            source_node = sample_indices[i] # 这是在NMS_indices中的索引，而这个索引对应全图上的点的某个点
+            valid_nbr_indices = knn_idx[i, knn_idx[i, :] < nmsed_point_num] # 这是在NMS_points中的索引，这个索引只对应NMS中的点
+            # 挑选一下返回的近邻点，其在nms_points中的索引不能>=nms点的数量
+            # 这貌似有点多余，因为kdtree本来就是用nms_points建立的
             valid_nbr_indices = valid_nbr_indices[1:] # the nearest one is self so remove
             target_nodes = [nmsed_indices[ni] for ni in valid_nbr_indices]  
 
@@ -210,19 +215,20 @@ class GraphLabelGenerator():
         # homo for rot
         # [N, 3]
         nmsed_points = np.concatenate([nmsed_points, np.ones((nmsed_point_num, 1), dtype=nmsed_points.dtype)], axis=1)
-        trans = np.array([
+        trans = np.array([      # 用来平移，把坐标原点移到patch中间
             [1, 0, -0.5 * self.config.PATCH_SIZE],
             [0, 1, -0.5 * self.config.PATCH_SIZE],
             [0, 0, 1],
-        ], dtype=np.float32)
+        ], dtype=np.float32)   
         # ccw 90 deg in img (x, y)
-        rot = np.array([
+        rot = np.array([   
             [0, 1, 0],
             [-1, 0, 0],
             [0, 0, 1],
         ], dtype=np.float32)
-        nmsed_points = nmsed_points @ trans.T @ np.linalg.matrix_power(rot.T, rot_index) @ np.linalg.inv(trans.T)
-        nmsed_points = nmsed_points[:, :2]
+        nmsed_points = nmsed_points @ trans.T @ np.linalg.matrix_power(rot.T, rot_index) @ np.linalg.inv(trans.T)   # 乘以逆矩阵是为了把坐标原点又变回patch左上角即(0, 0)
+        # matrix_power(rot.T, rot_index)表示应用几次rot矩阵进行变换，这里旋转rot_index次
+        nmsed_points = nmsed_points[:, :2]  # 去掉为了齐次而加的1那一列
             
         # Add noise
         noise_scale = 1.0  # pixels
@@ -235,7 +241,7 @@ def test_graph_label_generator():
     if not os.path.exists('debug'):
         os.mkdir('debug')
 
-    dataset = 'spacenet'
+    dataset = 'cityscale'
     if dataset == 'cityscale':
         rgb_path = './cityscale/20cities/region_166_sat.png'
         # Load GT Graph
@@ -382,7 +388,7 @@ class SatMapDataset(Dataset):
         self.sample_max = self.IMAGE_SIZE - (self.config.PATCH_SIZE + self.SAMPLE_MARGIN)
 
         if not self.is_train:
-            eval_patches_per_edge = math.ceil((self.IMAGE_SIZE - 2 * self.SAMPLE_MARGIN) / self.config.PATCH_SIZE)
+            eval_patches_per_edge = math.ceil((self.IMAGE_SIZE - 2 * self.SAMPLE_MARGIN) / self.config.PATCH_SIZE)  # 这句代码使得在首尾抠除margin大小后，eval时只有除不尽时才会有重叠，不够的部分会靠均匀地重叠来达成
             self.eval_patches = []
             for i in range(len(tile_indices)):
                 self.eval_patches += get_patch_info_one_img(
@@ -400,7 +406,7 @@ class SatMapDataset(Dataset):
             return len(self.eval_patches)
 
     def __getitem__(self, idx):
-        # Sample a patch.
+        # Sample a patch.ADAD
         if self.is_train:
             img_idx = np.random.randint(low=0, high=len(self.rgbs))
             begin_x = np.random.randint(low=self.sample_min, high=self.sample_max+1)
@@ -428,6 +434,7 @@ class SatMapDataset(Dataset):
         patch = ((begin_x, begin_y), (end_x, end_y))
         # points are img (x, y) inside the patch.
         graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)
+        # 返回结果是 采样点坐标*512个，(采样点邻域内点坐标点对*最多16个， 是否与之相连*最多16个，是否有效*最多16个)
         
         pairs, connected, valid = zip(*topo_samples)
         
@@ -438,8 +445,8 @@ class SatMapDataset(Dataset):
             'keypoint_mask': torch.tensor(keypoint_mask_patch, dtype=torch.float32) / 255.0,
             'road_mask': torch.tensor(road_mask_patch, dtype=torch.float32) / 255.0,
             
-            'graph_points': torch.tensor(graph_points, dtype=torch.float32),
-            'pairs': torch.tensor(pairs, dtype=torch.int32),
+            'graph_points': torch.tensor(graph_points, dtype=torch.float32),    # 点的坐标
+            'pairs': torch.tensor(pairs, dtype=torch.int32),    # 索引组成的点对（src, dst）
             'connected': torch.tensor(connected, dtype=torch.bool),
             'valid': torch.tensor(valid, dtype=torch.bool),
         }

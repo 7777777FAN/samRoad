@@ -8,6 +8,7 @@ from sklearn.neighbors import KDTree
 from skimage.draw import line
 import networkx as nx
 from graph_utils import nms_points
+from skimage.morphology import skeletonize
 
 
 IMAGE_SIZE = 2048
@@ -21,11 +22,23 @@ def read_rgb_img(path):
 
 
 # returns (x, y)
-def get_points_and_scores_from_mask(mask, threshold):
-    rcs = np.column_stack(np.where(mask > threshold))   # 把分别存储了非零值所在位置的行和列坐标的数组转换为列后叠成矩阵，这样每一行就是rc
-    xys = rcs[:, ::-1]  # 调换rc成为xy
-    scores = mask[mask > threshold]     # 非0值的列表
+def get_points_and_scores_from_mask(mask, threshold, keypoint=False, mode='normal'):
+    assert mode in ['normal', 'center']
+    if keypoint:
+        mode = 'normal'
+        
+    if 'normal' == mode:
+        rcs = np.column_stack(np.where(mask > threshold))   # 把分别存储了非零值所在位置的行和列坐标的数组转换为列后叠成矩阵，这样每一行就是rc  
+        scores = mask[mask > threshold]     # 非0值的列表  
+    # 改成先细化再返回点
+    elif 'center' == mode:
+        img = np.array(mask > threshold).astype(np.uint8)
+        skel = skeletonize(img, method="lee")
+        rcs = np.column_stack(np.where(skel))  
+        scores = mask[skel != 0]
+    xys = rcs[:, ::-1]  # 调换rc成为xy   
     return xys, scores
+    
 
 
 def draw_points_on_image(image, points, radius):
@@ -128,13 +141,18 @@ def create_cost_field_astar(sample_pts, road_mask, block_threshold=200):
 
 
 def extract_graph_points(keypoint_mask, road_mask, config):
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
+    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255, keypoint=True, mode='normal')
     kps_0 = nms_points(kp_candidates, kp_scores, config.ITSC_NMS_RADIUS)
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255)
+    # 道路中心线上的点
+    kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255, keypoint=False, mode='center')
     kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    # 道路区域上点
+    kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255, keypoint=False, mode='normal')
+    kps_2 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     # prioritize intersection points
-    kp_candidates = np.concatenate([kps_0, kps_1], axis=0)
-    kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0]))], axis=0)
+    kp_candidates = np.concatenate([kps_0, kps_1, kps_2], axis=0)
+    kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0]))+0.1, np.zeros((kps_2.shape[0]))], axis=0) # np.zeros((kps_1.shape[0]))+0.1是为了以中心线上的点为准，不足的地方才用路面点补充
+    # 其实此时的kp_scores更像是权重
     kps = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     return kps
 

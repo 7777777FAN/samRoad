@@ -1,6 +1,5 @@
 import numpy as np
 from scipy import interpolate
-from shapely.geometry import LineString
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import networkx as nx
@@ -461,8 +460,8 @@ def igraph_from_adj_dict(graph, coord_transform):
     n_vertices = nodes.shape[0]
     if n_vertices == 0:
         nodes = np.zeros((0, 2), dtype=nodes.dtype)
-    edges = set([(min(src, tgt), max(src, tgt)) for src, tgt in edges])
-    g = ig.Graph(n_vertices, list(edges))
+    edges = set([(min(src, tgt), max(src, tgt)) for src, tgt in edges]) # 永远小索引指向大索引，这样可以去除de-duplication
+    g = ig.Graph(n_vertices, list(edges))   # n个点，后面是所有的边
     try:
         g.vs['point'] = coord_transform(nodes)  # to xy
     except Exception:
@@ -501,7 +500,7 @@ def find_intersection(segment1, segment2):
     intersection = line1.intersection(line2)
 
     if not intersection.is_empty and intersection.geom_type == 'Point':
-        if not (
+        if not (    # 交点不能在4个端点
             intersection.equals(Point(x1, y1)) or
             intersection.equals(Point(x2, y2)) or
             intersection.equals(Point(x3, y3)) or
@@ -520,7 +519,7 @@ def find_crossover_points(graph):
     # - which is fine for now just be aware
     points = graph.vs['point']
     edges = graph.es
-    lines = [(points[edge.source], points[edge.target]) for edge in edges]
+    lines = [(points[edge.source], points[edge.target]) for edge in edges]  # 所有线段的起终点坐标
     line_bboxes = [get_line_bbox(line) for line in lines]
     line_index = rtree.index.Index()
     for idx, bbox in enumerate(line_bboxes):
@@ -529,10 +528,10 @@ def find_crossover_points(graph):
     crossover_points = []
     tested_pairs = set()
     for i, line_0 in enumerate(lines):
-        bbox = line_bboxes[i]
-        nearby_indices = list(line_index.intersection(bbox))
+        bbox = line_bboxes[i]   # 查询边界框
+        nearby_indices = list(line_index.intersection(bbox))    # 与该边界框相交的边界框的索引
         for ni in nearby_indices:
-            pair = (min(i, ni), max(i, ni))
+            pair = (min(i, ni), max(i, ni)) 
             if pair in tested_pairs:
                 continue
             line_1 = lines[ni]
@@ -556,7 +555,7 @@ def subdivide_graph(graph, resolution):
         # [N, 2] = [1, 2] + [N, 1] @ [1, 2]
         sampled_pts = np.expand_dims(np.array(p0), axis=0) + np.expand_dims(samples, axis=1) @ np.expand_dims(p1 - p0, axis=0)
         # [N-2, 2]
-        sampled_pts = sampled_pts[1:-1, :]
+        sampled_pts = sampled_pts[1:-1, :]  # 去掉首尾端点，得到中间的采样点坐标
         new_point_indices = []
         for new_pt in sampled_pts:
             new_point_indices.append(len(new_points))
@@ -571,7 +570,7 @@ def subdivide_graph(graph, resolution):
         
 def nms_points(points, scores, radius, return_indices=False):
     # if score > 1.0, the point is forced to be kept regardless
-    sorted_indices = np.argsort(scores)[::-1]   # 默认从小到大排序
+    sorted_indices = np.argsort(scores)[::-1]   # 默认按值从小到大排序，改为从大到小，返回->值的索引
     sorted_points = points[sorted_indices, :]   # 点坐标 组成的矩阵
     sorted_scores = scores[sorted_indices]      # 大于thr的分数 组成的列表
     kept = np.ones(sorted_indices.shape[0], dtype=bool)
@@ -582,10 +581,11 @@ def nms_points(points, scores, radius, return_indices=False):
         # neighbor_indices = tree.query_radius(p[np.newaxis, :], r=radius)[0]
         neighbor_indices = tree.query_ball_point(p, r=radius)
         neighbor_scores = sorted_scores[neighbor_indices]
-        keep_nbr = np.greater(neighbor_scores, 1.0)     # 等价于keep_nbr = neighbor_scores > 1.0    # 这里是相当于把当前点周围的点的保留值设为False，因为这些点的score不可能大于1.0
-        
+        keep_nbr = np.greater(neighbor_scores, 1.0)     
+        # 等价于keep_nbr = neighbor_scores > 1.0    
+        # 这里是相当于把当前点周围的点的保留值设为False，因为这些点的score不可能大于1.0，交叉点会是2就不会被抑制
         kept[neighbor_indices] = keep_nbr
-        kept[idx] = True    # 这一句貌似有点多余
+        kept[idx] = True    # 这一句貌似有点多余->不多余，因为后面进行挑选需要数据类型是bool
     if return_indices:
         return sorted_points[kept], sorted_indices[kept]
     else:
