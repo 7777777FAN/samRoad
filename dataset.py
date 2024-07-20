@@ -319,10 +319,11 @@ class SatMapDataset(Dataset):
             # TODO: SAMPLE_MARGIN here is for training, the one in config is for inference
             self.SAMPLE_MARGIN = 64
 
-            rgb_pattern = './cityscale/20cities/region_{}_sat.png'
-            keypoint_mask_pattern = './cityscale/processed/keypoint_mask_{}.png'
-            road_mask_pattern = './cityscale/processed/road_mask_{}.png'
-            gt_graph_pattern = './cityscale/20cities/region_{}_refine_gt_graph.p'
+            self.rgb_pattern = './cityscale/20cities/region_{}_sat.png'
+            self.keypoint_mask_pattern = './cityscale/processed/keypoint_mask_{}.png'
+            self.road_mask_pattern = './cityscale/processed/road_mask_{}.png'
+            self.gt_graph_pattern = './cityscale/20cities/region_{}_refine_gt_graph.p'
+            self.GTE_pattern = './cityscale/GTE/region_{}_GTE.npz'
             
             train, val, test = cityscale_data_partition()
 
@@ -330,58 +331,32 @@ class SatMapDataset(Dataset):
             # takes [N, 2] points
             coord_transform = lambda v : v[:, ::-1]
 
-        elif self.config.DATASET == 'spacenet':
-            self.IMAGE_SIZE = 400
-            self.SAMPLE_MARGIN = 0
-
-            rgb_pattern = './spacenet/RGB_1.0_meter/{}__rgb.png'
-            keypoint_mask_pattern = './spacenet/processed/keypoint_mask_{}.png'
-            road_mask_pattern = './spacenet/processed/road_mask_{}.png'
-            gt_graph_pattern = './spacenet/RGB_1.0_meter/{}__gt_graph.p'
-            
-            train, val, test = spacenet_data_partition()
-
-            # coord-transform ??? -> (x, y)
-            # takes [N, 2] points
-            coord_transform = lambda v : np.stack([v[:, 1], 400 - v[:, 0]], axis=1)
-
         self.is_train = is_train
 
         train_split = train + val
         test_split = test
 
         tile_indices = train_split if self.is_train else test_split
-        self.tile_indices = tile_indices
+        self.tile_indices_full = tile_indices
+        
         
         # Stores all imgs in memory.
         self.rgbs, self.keypoint_masks, self.road_masks = [], [], []
+        self.GTEs = []
+        self.max_degree = 6
         # For graph label generation.
         self.graph_label_generators = []
 
+
+        ##### FAST DEBUG
+        self.set_tileindex_range(intact=True)
+        if self.is_train and self.config.DATA_SPLIT:
+            self.set_tileindex_range(intact=False, start=0, end=len(self.tile_indices_full)//2)
+            
         ##### FAST DEBUG
         if dev_run:
-            tile_indices = tile_indices[:4]
-        ##### FAST DEBUG
-
-        for tile_idx in tile_indices:
-            print(f'loading tile {tile_idx}')
-            rgb_path = rgb_pattern.format(tile_idx)
-            road_mask_path = road_mask_pattern.format(tile_idx)
-            keypoint_mask_path = keypoint_mask_pattern.format(tile_idx)
-
-            # graph label gen
-            # gt graph: dict for adj list, for cityscale set keys are (r, c) nodes, values are list of (r, c) nodes
-            # I don't know what coord system spacenet uses but we convert them all to (x, y)
-            gt_graph_adj = pickle.load(open(gt_graph_pattern.format(tile_idx),'rb'))
-            if len(gt_graph_adj) == 0:
-                print(f'===== skipped empty tile {tile_idx} =====')
-                continue
-
-            self.rgbs.append(read_rgb_img(rgb_path))
-            self.road_masks.append(cv2.imread(road_mask_path, cv2.IMREAD_GRAYSCALE))
-            self.keypoint_masks.append(cv2.imread(keypoint_mask_path, cv2.IMREAD_GRAYSCALE))
-            graph_label_generator = GraphLabelGenerator(config, gt_graph_adj, coord_transform)
-            self.graph_label_generators.append(graph_label_generator)
+            self.tile_indices = self.tile_indices_full[:4]
+        self.load_data()
             
         
         self.sample_min = self.SAMPLE_MARGIN
@@ -395,11 +370,30 @@ class SatMapDataset(Dataset):
                     i, self.IMAGE_SIZE, self.SAMPLE_MARGIN, self.config.PATCH_SIZE, eval_patches_per_edge
                 )
 
+
+    def load_data(self):
+        for tile_idx in self.tile_indices:
+            print(f'loading tile {tile_idx}')
+            rgb_path = self.rgb_pattern.format(tile_idx)
+            GTE_path = self.GTE_pattern.format(tile_idx)
+            
+            self.rgbs.append(read_rgb_img(rgb_path))  
+            self.GTEs.append(np.load(GTE_path)['GTE'])
+
+    def set_tileindex_range(self, intact=True, start=0, end=0):
+        if intact:
+            self.tile_indices = self.tile_indices_full
+        else:
+            assert start != end
+            self.tile_indices = self.tile_indices_full[start:end]
+        
+    
+        
     def __len__(self):
         if self.is_train:
             # Pixel seen in one epoch ~ 17 x total pixels in training set
             if self.config.DATASET == 'cityscale':
-                return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500
+                return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500 
             elif self.config.DATASET == 'spacenet':
                 return 84667
         else:
@@ -418,37 +412,43 @@ class SatMapDataset(Dataset):
         
         # Crop patch imgs and masks
         rgb_patch = self.rgbs[img_idx][begin_y:end_y, begin_x:end_x, :]
-        keypoint_mask_patch = self.keypoint_masks[img_idx][begin_y:end_y, begin_x:end_x]
-        road_mask_patch = self.road_masks[img_idx][begin_y:end_y, begin_x:end_x]
+        
+        GTE_patch = self.GTEs[img_idx][begin_y:end_y, begin_x:end_x, :]    # GTE也是按照rc编码的，但是samRoad使用的graph是xy的
 
         # Augmentation
         rot_index = 0
         if self.is_train:
             rot_index = np.random.randint(0, 4)
-            # CCW
+            # CCWs
             rgb_patch = np.rot90(rgb_patch, rot_index, [0,1]).copy()
-            keypoint_mask_patch = np.rot90(keypoint_mask_patch, rot_index, [0, 1]).copy()
-            road_mask_patch = np.rot90(road_mask_patch, rot_index, [0, 1]).copy()
-        
-        # Sample graph labels from patch
-        patch = ((begin_x, begin_y), (end_x, end_y))
-        # points are img (x, y) inside the patch.
-        graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)
-        # 返回结果是 采样点坐标*512个，(采样点邻域内点坐标点对*最多16个， 是否与之相连*最多16个，是否有效*最多16个)
-        
-        pairs, connected, valid = zip(*topo_samples)
-        
-        # rgb: [H, W, 3] 0-255
-        # masks: [H, W] 0-1
+            GTE_patch = np.rot90(GTE_patch, rot_index, [0, 1]).copy()
+            
+            # dx, dy的变换
+            # rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
+            #             [math.cos(math.pi/2), math.sin(math.pi/2)],
+            #             [-math.sin(math.pi/2), math.cos(math.pi/2)]
+            # ], dtype=np.float32)
+            
+            rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
+                        [0, 1],
+                        [-1, 0]
+            ], dtype=np.float32)
+
+            # 只对所有不为0的进行变换，其余的全是0，没必要再计算了
+            for r, c in np.column_stack(np.where(GTE_patch[:,:, 0]>0.98)):
+                delta_coords = []
+                for j in range(self.max_degree):
+                    delta_coords.append([GTE_patch[r, c, 1+3*j+1], GTE_patch[r, c, 1+3*j+2]])   # dx, dy
+                delta_coords_to_rot = np.column_stack(delta_coords)
+                roted_coords = np.linalg.matrix_power(rot_mat, rot_index)@delta_coords_to_rot
+                
+                for j in range(self.max_degree):    # stick back
+                    GTE_patch[r, c, 1+3*j+1], GTE_patch[r, c, 1+3*j+2] = roted_coords[:, j]
+            
+            
         return {
             'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
-            'keypoint_mask': torch.tensor(keypoint_mask_patch, dtype=torch.float32) / 255.0,
-            'road_mask': torch.tensor(road_mask_patch, dtype=torch.float32) / 255.0,
-            
-            'graph_points': torch.tensor(graph_points, dtype=torch.float32),    # 点的坐标
-            'pairs': torch.tensor(pairs, dtype=torch.int32),    # 索引组成的点对（src, dst）
-            'connected': torch.tensor(connected, dtype=torch.bool),
-            'valid': torch.tensor(valid, dtype=torch.bool),
+            'GTE': torch.tensor(GTE_patch, dtype=torch.float32),
         }
 
 
