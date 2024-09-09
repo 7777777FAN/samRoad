@@ -32,6 +32,7 @@ parser.add_argument(
     "--output_dir", default=None, help="Name of the output dir, if not specified will use timestamp"
 )
 parser.add_argument("--device", default="cuda", help="device to use for training")
+
 args = parser.parse_args()
 
 
@@ -288,6 +289,8 @@ if __name__ == "__main__":
     total_inference_seconds = 0.0
 
     num_processd = 0
+    
+    test_img_indices = [49, 179]
     for img_id in test_img_indices:
         print(f'Processing {img_id}')
         # [H, W, C] RGB

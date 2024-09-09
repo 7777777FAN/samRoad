@@ -484,7 +484,8 @@ def DrawKP(imagegraph, filename, imagesize=256, max_degree=6):
 
 
 # Main function 
-def DecodeAndVis(imagegraph, filename, 
+def DecodeAndVis(imagegraph, 
+                 filename, 
                  imagesize=256, 
                  max_degree=6, 
                  thr=0.5, 
@@ -852,7 +853,7 @@ def DecodeAndVis(imagegraph, filename,
 
 			x,y = keypoints[0][i], keypoints[1][i]
 
-			cv2.circle(rgb, (y*4,x*4), 5, (255,0,0), -1)
+			cv2.circle(rgb, (y*4,x*4), 5, (255,0,0), -1)	
 			cc += 1
 
 			d = 0
@@ -883,7 +884,7 @@ def DecodeAndVis(imagegraph, filename,
 
 			x,y = keypoints[0][i], keypoints[1][i]
 
-			cv2.circle(rgb, (y*4,x*4), 5, (255,0,0), -1)
+			cv2.circle(rgb, (y*4,x*4), 5, (255,0,0), -1)	# 红（PIL）
 			cc += 1
 
 			d = 0
@@ -894,14 +895,14 @@ def DecodeAndVis(imagegraph, filename,
 				if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr*0.5: # or thr < 0.2:
 					d += 1
 
-			color = (255,0,0)
+			color = (255,0,0)	# 蓝 d==0,1 -> 红（PIL）
 			if d == 2:
-				color = (0,255,0)
+				color = (0,255,0)	# 绿 -> 绿（PIL）
 			if d == 3:
-				color = (0,128,128)
+				color = (0,128,128)	# 深绿/青	-> 青（PIL）
 
 			if d >= 4:
-				color = (0,0,255)
+				color = (0,0,255)	# 红 -> 蓝（PIL）
 
 			cv2.circle(rgb2, (y*4,x*4), 8, color, -1)
 		

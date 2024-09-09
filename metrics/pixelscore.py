@@ -9,8 +9,9 @@ from tqdm import tqdm
 
 
 IMAGE_SIZE = 2048
-SEGMENT_WIDTH = 5  # 生成5像素宽路面mask，要跟论文中使用的mask对上，论文用CV画的，3像素宽度的，一边就有（3+1）/2 = 2条线，加上中间就有5像素宽度
+SEGMENT_WIDTH = 3  # 生成5像素宽路面mask，要跟论文中使用的mask对上，论文samRoad用CV画的，3像素宽度的，一边就有（3+1）/2 = 2条线，加上中间就有5像素宽度
 # 不理解为什么设置为5请看OneNote->小点点
+# 为了根所有方法对比，设置为3
 
 def create_directory(dir,delete=False):
     if os.path.isdir(dir) and delete:
@@ -54,12 +55,12 @@ def evaluate(args, names):
     # for name in os.listdir(f'{args.savedir}/test/skeleton'):
     for name in tqdm(names):
         # pred_graph = np.array(Image.open(f'{args.savedir}/mask/{name}_road.png'))     # 预测的MASK
-        pred_graph = np.array(Image.open(f'{args.savedir}/skel_from_graph/{name}_skel_from_graph.png')) # 由预测图生成的但像素宽度的道路线
+        pred_graph = np.array(Image.open(f'{args.savedir}/skel_from_graph/{name}.png')) # 由预测图生成的但像素宽度的道路线
         # pred_graph = np.array(Image.open(f'{args.savedir}/mask/{name}_skeleton.png'))     # 由MASK细化得到的skel
         
         # gt_graph = np.array(Image.open(f'./segment_{SEGMENT_WIDTH}/{name}.png'))  # RNGDet的MASK
         # gt_graph = np.array(Image.open(f'/home/godx/research/source_code/sam_road/cityscale/processed/road_mask_{name}.png'))   # samRoad的MASK
-        gt_graph = np.array(Image.open(f'/home/godx/research/source_code/sam_road/cityscale/processed_3_width/road_mask_{name}.png'))   # 根据数据集的图数据生成的3像素宽度的mask
+        gt_graph = np.array(Image.open(f'/home/space7T/godx/research/samRoad/samRoad/metrics/segment_3/{name}.png'))   # 根据数据集的图数据生成的3像素宽度的mask
         
         # p, r, f1 = pixel_eval_metric(pred_graph>0.364 * 255, gt_graph)
         p, r, f1 = pixel_eval_metric(pred_graph,gt_graph)   # skeleton已经做过二值化了
@@ -75,25 +76,26 @@ def evaluate(args, names):
 
 def cal_pixelscore(args):
     create_directory(f"{args.savedir}/results/pixelscore_{args.relax}", delete=True)
+    create_directory(f"{args.savedir}/score", delete=True)
     
     print("======================== Calculate Pixel score ========================")
     print(f"Step 1: generating {SEGMENT_WIDTH} pixel wide gt mask")
     # 评价cityscale时用
     names = [8, 9, 19, 28, 29, 39, 48, 49, 59, 68, 69, 79, 88, 89, 99, 108, 109, 119, 128, 129, 139, 148, 149, 159, 168, 169, 179]
-    # if not os.path.exists(f'./segment_{SEGMENT_WIDTH}'):
-    #     create_directory(f'./segment_{SEGMENT_WIDTH}', delete=False)
-    #     for patch_name in tqdm(names):
-    #         with open(f'/home/godx/research/RNGDet_test/RNGDetPlusPlus/cityscale/data/graph/{patch_name}.json','r') as jf:
-    #             edges = json.load(jf)["edges"]
+    if not os.path.exists(f'./segment_{SEGMENT_WIDTH}'):
+        create_directory(f'./segment_{SEGMENT_WIDTH}', delete=False)
+        for patch_name in tqdm(names):
+            with open(f'/home/space7T/godx/research/my_code/exp_repo/graph/RNGDetPP/cityscale/data/graph/{patch_name}.json','r') as jf:
+                edges = json.load(jf)["edges"]
                 
-    #         global_mask = Image.fromarray(np.zeros((IMAGE_SIZE,IMAGE_SIZE))).convert('RGB')
-    #         draw = ImageDraw.Draw(global_mask)
-    #         global_mask.load()
+            global_mask = Image.fromarray(np.zeros((IMAGE_SIZE,IMAGE_SIZE))).convert('RGB')
+            draw = ImageDraw.Draw(global_mask)
+            global_mask.load()
 
-    #         for e in edges:
-    #             for i, v in enumerate(e['vertices'][1:]):
-    #                 draw.line([e['vertices'][i][0],e['vertices'][i][1],v[0],v[1]],width=SEGMENT_WIDTH ,fill=(255,255,255))
-    #         global_mask.save(f'./segment_{SEGMENT_WIDTH}/{patch_name}.png')
+            for e in edges:
+                for i, v in enumerate(e['vertices'][1:]):
+                    draw.line([e['vertices'][i][0],e['vertices'][i][1],v[0],v[1]],width=SEGMENT_WIDTH ,fill=(255,255,255))
+            global_mask.save(f'./segment_{SEGMENT_WIDTH}/{patch_name}.png')
         
     print(f"Mask generation finished")   
     print(f"Step 2: calculating pixel scores")

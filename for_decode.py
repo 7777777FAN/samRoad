@@ -1,14 +1,17 @@
-# %%
-# 可视化GTE
+# 可以初步可视化GTE以及完全解码GTE
 import cv2 as cv
 from skimage import measure
 from scipy.ndimage import rotate
+from tqdm import tqdm
 import numpy as np
 import os.path as osp
 import os
 import torch
 import shutil
+import json
 
+
+from decoder import DecodeAndVis
 
 
 IMG_SIZE = 2048
@@ -19,9 +22,7 @@ VECTOR_NORM = 25.0
 NUM_PROCESS = 10
 NUM_THREAD = 10
  
-# 将图编码为19维张量
-rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
-GTE_logits_pattern = './save/成功的GTE/GTE_logits/region_{}_GTE_logits.npz'
+
 
 
 
@@ -78,16 +79,28 @@ def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_
     
 
 
-GTE = np.load(open(GTE_logits_pattern.format(8), 'rb'))['GTE_logits']
-verify_dir = './save/成功的GTE/verify'
-# if osp.exists(verify_dir):
-#     shutil.rmtree(verify_dir)
-# os.makedirs(verify_dir)
-# vis_GT_GTE(GTE, aug=False)
 
-# %%
-# 用Sat2Graph的解码算法解码一下
-from decoder import DecodeAndVis
 
-output_file = './save/成功的GTE/decode_result/region_8'
-DecodeAndVis(GTE, output_file, thr=0.01, edge_thr=0.1, angledistance_weight=50, snap=True, imagesize=2048)
+
+
+
+rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
+GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
+data_split_path = './cityscale/data_split.json'
+
+# test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
+
+test_tile_idxes = [49, 179]
+for idx in tqdm(test_tile_idxes):
+    GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
+
+    # 可视化，用于检验自己的编码是否正确以及预测结果是否正确（暂不论结果好坏）
+    verify_dir = './save/修正损失计算重训/verify'
+    # if osp.exists(verify_dir):
+    #     shutil.rmtree(verify_dir)
+    # os.makedirs(verify_dir)
+    # vis_GT_GTE(GTE, aug=False)
+
+    # 用Sat2Graph的解码算法解码
+    output_file = f'./save/修正损失计算重训/decode_result/region_{idx}'
+    DecodeAndVis(GTE, output_file, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
