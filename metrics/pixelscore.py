@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 
 IMAGE_SIZE = 2048
-SEGMENT_WIDTH = 5  # 生成5像素宽路面mask，要跟论文中使用的mask对上，论文用CV画的，3像素宽度的，一边就有（3+1）/2 = 2条线，加上中间就有5像素宽度
+SEGMENT_WIDTH = 3  # 生成5像素宽路面mask，要跟论文中使用的mask对上，论文用CV画的，3像素宽度的，一边就有（3+1）/2 = 2条线，加上中间就有5像素宽度
 # 不理解为什么设置为5请看OneNote->小点点
 
 def create_directory(dir,delete=False):
@@ -59,7 +59,7 @@ def evaluate(args, names):
         
         # gt_graph = np.array(Image.open(f'./segment_{SEGMENT_WIDTH}/{name}.png'))  # RNGDet的MASK
         # gt_graph = np.array(Image.open(f'/home/godx/research/source_code/sam_road/cityscale/processed/road_mask_{name}.png'))   # samRoad的MASK
-        gt_graph = np.array(Image.open(f'/home/godx/research/source_code/sam_road/cityscale/processed_3_width/road_mask_{name}.png'))   # 根据数据集的图数据生成的3像素宽度的mask
+        gt_graph = np.array(Image.open(f'/home/godx/research/source_code/sam_road/metrics/segment_{SEGMENT_WIDTH}/{name}.png'))   # 根据数据集的图数据生成的3像素宽度的mask
         
         # p, r, f1 = pixel_eval_metric(pred_graph>0.364 * 255, gt_graph)
         p, r, f1 = pixel_eval_metric(pred_graph,gt_graph)   # skeleton已经做过二值化了

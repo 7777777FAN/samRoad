@@ -330,6 +330,7 @@ if __name__ == "__main__":
         viz_save_dir = os.path.join(output_dir, 'viz')
         if not os.path.exists(viz_save_dir):
             os.makedirs(viz_save_dir)
+        
         viz_img = triage.visualize_image_and_graph(viz_img, pred_nodes / img_size, pred_edges, viz_img.shape[0])
         cv2.imwrite(os.path.join(viz_save_dir, f'{img_id}.png'), viz_img)
 
