@@ -88,9 +88,9 @@ rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
 GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
 data_split_path = './cityscale/data_split.json'
 
-# test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
+test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
 
-test_tile_idxes = [49, 179]
+# test_tile_idxes = [49, 179]
 for idx in tqdm(test_tile_idxes):
     GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
 

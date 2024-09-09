@@ -837,10 +837,12 @@ def DecodeAndVis(imagegraph,
 			isolated_thr = 100
 
 		graph = graph_shave(graph, spurs_thr = spurs_thr)
+		_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
 	else:
 		graph = neighbors 
+		_vis(graph, filename+"_no_refine_bk.png", size=imagesize, draw_intersection=True)
 
-	_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
+	# _vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
 
 
 	cc = 0
