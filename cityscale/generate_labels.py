@@ -11,7 +11,7 @@ KEYPOINT_RADIUS = 3
 ROAD_WIDTH = 3
 # ROAD_WIDTH = 2
 output_dir = './processed'
-GTE_output_dir
+# GTE_output_dir
 
 def create_directory(dir,delete=False):
     if os.path.isdir(dir) and delete:

@@ -17,7 +17,7 @@ import scipy
 import rtree
 from collections import defaultdict
 import time
-
+import numpy as np
 from argparse import ArgumentParser
 
 
@@ -32,6 +32,7 @@ parser.add_argument(
     "--output_dir", default=None, help="Name of the output dir, if not specified will use timestamp"
 )
 parser.add_argument("--device", default="cuda", help="device to use for training")
+
 args = parser.parse_args()
 
 
@@ -58,7 +59,7 @@ def get_batch_img_patches(img, batch_patch_info):
     return batch
 
 
-def infer_one_img(net, img, config):
+def infer_one_img(net, img, config, img_id):
     # TODO(congrui): centralize these configs
     image_size = img.shape[0]
 
@@ -76,13 +77,15 @@ def infer_one_img(net, img, config):
     
 
     # [IMG_H, IMG_W]
-    fused_keypoint_mask = torch.zeros(img.shape[0:2], dtype=torch.float32).to(args.device, non_blocking=False)
-    fused_road_mask = torch.zeros(img.shape[0:2], dtype=torch.float32).to(args.device, non_blocking=False)
-    pixel_counter = torch.zeros(img.shape[0:2], dtype=torch.float32).to(args.device, non_blocking=False)
+    IMG_H, IMG_W = img.shape[0:2]
+    fused_keypoint_mask = torch.zeros((IMG_H, IMG_W), dtype=torch.float32).to(args.device, non_blocking=False)
+    # fused_road_mask = torch.zeros(img.shape[0:2], dtype=torch.float32).to(args.device, non_blocking=False)
+    pixel_counter = torch.zeros((IMG_H, IMG_W), dtype=torch.float32).to(args.device, non_blocking=False)
+    fused_GTE_scores_mask = torch.zeros((IMG_H, IMG_W, 19), dtype=torch.float32).to(args.device, non_blocking=False)
 
     # stores img embeddings for toponet
     # list of [B, D, h, w], len=batch_num
-    img_features = list()
+    # img_features = list()
 
     for batch_index in range(batch_num):
         offset = batch_index * batch_size
@@ -93,22 +96,36 @@ def infer_one_img(net, img, config):
         with torch.no_grad():
             batch_img_patches = batch_img_patches.to(args.device, non_blocking=False)
             # [B, H, W, 2]
-            mask_scores, patch_img_features = net.infer_masks_and_img_features(batch_img_patches)
-            img_features.append(patch_img_features)
+            # mask_scores, patch_img_features = net.infer_masks_and_img_features(batch_img_patches)
+            GTE_scores = net.infer_masks_and_img_features(batch_img_patches)
+            # img_features.append(patch_img_features)
+            
         # Aggregate masks
+        
         for patch_index, patch_info in enumerate(batch_patch_info):
             _, (x0, y0), (x1, y1) = patch_info
-            keypoint_patch, road_patch = mask_scores[patch_index, :, :, 0], mask_scores[patch_index, :, :, 1]
+            # keypoint_patch, road_patch = mask_scores[patch_index, :, :, 0], mask_scores[patch_index, :, :, 1]
+            
+            keypoint_patch = GTE_scores[patch_index, :, :, 0]
+            GTE_scores_patch = GTE_scores[patch_index, :, :, :]
             fused_keypoint_mask[y0:y1, x0:x1] += keypoint_patch
-            fused_road_mask[y0:y1, x0:x1] += road_patch
-            pixel_counter[y0:y1, x0:x1] += torch.ones(road_patch.shape[0:2], dtype=torch.float32, device=args.device)
+            fused_GTE_scores_mask[y0:y1, x0:x1] += GTE_scores_patch
+            # fused_road_mask[y0:y1, x0:x1] += road_patch
+            pixel_counter[y0:y1, x0:x1] += torch.ones(keypoint_patch.shape[0:2], dtype=torch.float32, device=args.device)
     
+    pixel_counter[pixel_counter == 0] = 1
     fused_keypoint_mask /= pixel_counter
-    fused_road_mask /= pixel_counter
+    fused_GTE_scores_mask /= pixel_counter.unsqueeze(-1)
+
+    # fused_road_mask /= pixel_counter
     # range 0-1 -> 0-255
     fused_keypoint_mask = (fused_keypoint_mask * 255).to(torch.uint8).cpu().numpy()
-    fused_road_mask = (fused_road_mask * 255).to(torch.uint8).cpu().numpy()
-
+    fused_GTE_logits_mask = fused_GTE_scores_mask.detach().cpu().numpy()
+    # fused_road_mask = (fused_road_mask * 255).to(torch.uint8).cpu().numpy()
+    GTE_save_dir = f'{output_dir}/GTE_logits'
+    if not os.path.exists(GTE_save_dir):
+        os.makedirs(GTE_save_dir)
+    np.savez(os.path.join(GTE_save_dir, f'region_{img_id}_GTE_logits'), GTE_logits=fused_GTE_logits_mask)
     # ## Astar graph extraction
     # pred_graph = graph_extraction.extract_graph_astar(fused_keypoint_mask, fused_road_mask, config)
     # # Doing this conversion to reuse copied code
@@ -118,120 +135,121 @@ def infer_one_img(net, img, config):
     
     
     ## Extract sample points from masks
-    graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
-    if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
-        return graph_points, np.zeros((0, 2), dtype=np.int32)
+    # graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
+    # if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
+    #     return graph_points, np.zeros((0, 2), dtype=np.int32)
 
     # for box query
-    graph_rtree = rtree.index.Index()
-    for i, v in enumerate(graph_points):
-        x, y = v
-        # hack to insert single points
-        graph_rtree.insert(i, (x, y, x, y))
+    # graph_rtree = rtree.index.Index()
+    # for i, v in enumerate(graph_points):
+    #     x, y = v
+    #     # hack to insert single points
+    #     graph_rtree.insert(i, (x, y, x, y))
     
     ## Pass 2: infer toponet to predict topology of points from stored img features
-    edge_scores = defaultdict(float)
-    edge_counts = defaultdict(float)
-    for batch_index in range(batch_num):
-        offset = batch_index * batch_size
-        batch_patch_info = all_patch_info[offset : offset + batch_size]
+    # edge_scores = defaultdict(float)
+    # edge_counts = defaultdict(float)
+    # for batch_index in range(batch_num):
+    #     offset = batch_index * batch_size
+    #     batch_patch_info = all_patch_info[offset : offset + batch_size]
 
-        topo_data = {
-            'points': [],
-            'pairs': [],
-            'valid': [],
-        }
-        idx_maps = []
+    #     topo_data = {
+    #         'points': [],
+    #         'pairs': [],
+    #         'valid': [],
+    #     }
+    #     idx_maps = []
 
 
-        # prepares pairs queries
-        for patch_info in batch_patch_info:
-            _, (x0, y0), (x1, y1) = patch_info
-            patch_point_indices = list(graph_rtree.intersection((x0, y0, x1, y1)))
-            idx_patch2all = {patch_idx : all_idx for patch_idx, all_idx in enumerate(patch_point_indices)}
-            patch_point_num = len(patch_point_indices)
-            # normalize into patch
-            patch_points = graph_points[patch_point_indices, :] - np.array([[x0, y0]], dtype=graph_points.dtype)
-            # for knn and circle query
-            patch_kdtree = scipy.spatial.KDTree(patch_points)
+    #     # prepares pairs queries
+    #     for patch_info in batch_patch_info:
+    #         _, (x0, y0), (x1, y1) = patch_info
+    #         patch_point_indices = list(graph_rtree.intersection((x0, y0, x1, y1)))
+    #         idx_patch2all = {patch_idx : all_idx for patch_idx, all_idx in enumerate(patch_point_indices)}
+    #         patch_point_num = len(patch_point_indices)
+    #         # normalize into patch
+    #         patch_points = graph_points[patch_point_indices, :] - np.array([[x0, y0]], dtype=graph_points.dtype)
+    #         # for knn and circle query
+    #         patch_kdtree = scipy.spatial.KDTree(patch_points)
 
-            # k+1 because the nearest one is always self
-            # idx is to the patch subgraph
-            knn_d, knn_idx = patch_kdtree.query(patch_points, k=config.MAX_NEIGHBOR_QUERIES + 1, distance_upper_bound=config.NEIGHBOR_RADIUS)
-            # [patch_point_num, n_nbr]
-            knn_idx = knn_idx[:, 1:]  # removes self
-            # [patch_point_num, n_nbr] idx is to the patch subgraph
-            src_idx = np.tile(
-                np.arange(patch_point_num)[:, np.newaxis],
-                (1, config.MAX_NEIGHBOR_QUERIES)
-            )
-            valid = knn_idx < patch_point_num
-            tgt_idx = np.where(valid, knn_idx, src_idx)
-            # [patch_point_num, n_nbr, 2]
-            pairs = np.stack([src_idx, tgt_idx], axis=-1)
+    #         # k+1 because the nearest one is always self
+    #         # idx is to the patch subgraph
+    #         knn_d, knn_idx = patch_kdtree.query(patch_points, k=config.MAX_NEIGHBOR_QUERIES + 1, distance_upper_bound=config.NEIGHBOR_RADIUS)
+    #         # [patch_point_num, n_nbr]
+    #         knn_idx = knn_idx[:, 1:]  # removes self
+    #         # [patch_point_num, n_nbr] idx is to the patch subgraph
+    #         src_idx = np.tile(
+    #             np.arange(patch_point_num)[:, np.newaxis],
+    #             (1, config.MAX_NEIGHBOR_QUERIES)
+    #         )
+    #         valid = knn_idx < patch_point_num
+    #         tgt_idx = np.where(valid, knn_idx, src_idx)
+    #         # [patch_point_num, n_nbr, 2]
+    #         pairs = np.stack([src_idx, tgt_idx], axis=-1)
 
-            topo_data['points'].append(patch_points)
-            topo_data['pairs'].append(pairs)
-            topo_data['valid'].append(valid)
-            idx_maps.append(idx_patch2all)
+    #         topo_data['points'].append(patch_points)
+    #         topo_data['pairs'].append(pairs)
+    #         topo_data['valid'].append(valid)
+    #         idx_maps.append(idx_patch2all)
         
-        # collate
-        collated = {}
-        for key, x_list in topo_data.items():
-            length = max([x.shape[0] for x in x_list])
-            collated[key] = np.stack([
-                np.pad(x, [(0, length - x.shape[0])] + [(0, 0)] * (len(x.shape) - 1))
-                for x in x_list
-            ], axis=0)
+    #     # collate
+    #     collated = {}
+    #     for key, x_list in topo_data.items():
+    #         length = max([x.shape[0] for x in x_list])
+    #         collated[key] = np.stack([
+    #             np.pad(x, [(0, length - x.shape[0])] + [(0, 0)] * (len(x.shape) - 1))
+    #             for x in x_list
+    #         ], axis=0)
 
-        # skips this batch if there's no points
-        if collated['points'].shape[1] == 0:
-            continue
+    #     # skips this batch if there's no points
+    #     if collated['points'].shape[1] == 0:
+    #         continue
         
-        # infer toponet
-        # [B, D, h, w]
-        batch_features = img_features[batch_index]
-        # [B, N_sample, N_pair, 2]
-        batch_points = torch.tensor(collated['points'], device=args.device)
-        batch_pairs = torch.tensor(collated['pairs'], device=args.device)
-        batch_valid = torch.tensor(collated['valid'], device=args.device)
+    #     # infer toponet
+    #     # [B, D, h, w]
+    #     batch_features = img_features[batch_index]
+    #     # [B, N_sample, N_pair, 2]
+    #     batch_points = torch.tensor(collated['points'], device=args.device)
+    #     batch_pairs = torch.tensor(collated['pairs'], device=args.device)
+    #     batch_valid = torch.tensor(collated['valid'], device=args.device)
 
 
-        with torch.no_grad():
-            # [B, N_samples, N_pairs, 1]
-            topo_scores = net.infer_toponet(batch_features, batch_points, batch_pairs, batch_valid)
+    #     with torch.no_grad():
+    #         # [B, N_samples, N_pairs, 1]
+    #         topo_scores = net.infer_toponet(batch_features, batch_points, batch_pairs, batch_valid)
                 
-        # all-invalid (padded, no neighbors) queries returns nan scores
-        # [B, N_samples, N_pairs]
-        topo_scores = torch.where(torch.isnan(topo_scores), -100.0, topo_scores).squeeze(-1).cpu().numpy()
+    #     # all-invalid (padded, no neighbors) queries returns nan scores
+    #     # [B, N_samples, N_pairs]
+    #     topo_scores = torch.where(torch.isnan(topo_scores), -100.0, topo_scores).squeeze(-1).cpu().numpy()
 
-        # aggregate edge scores
-        batch_size, n_samples, n_pairs = topo_scores.shape
-        for bi in range(batch_size):
-            for si in range(n_samples):
-                for pi in range(n_pairs):
-                    if not collated['valid'][bi, si, pi]:
-                        continue
-                    # idx to the full graph
-                    src_idx_patch, tgt_idx_patch = collated['pairs'][bi, si, pi, :]
-                    src_idx_all, tgt_idx_all = idx_maps[bi][src_idx_patch], idx_maps[bi][tgt_idx_patch]
-                    edge_score = topo_scores[bi, si, pi]
-                    assert 0.0 <= edge_score <= 1.0
-                    edge_scores[(src_idx_all, tgt_idx_all)] += edge_score
-                    edge_counts[(src_idx_all, tgt_idx_all)] += 1.0
+    #     # aggregate edge scores
+    #     batch_size, n_samples, n_pairs = topo_scores.shape
+    #     for bi in range(batch_size):
+    #         for si in range(n_samples):
+    #             for pi in range(n_pairs):
+    #                 if not collated['valid'][bi, si, pi]:
+    #                     continue
+    #                 # idx to the full graph
+    #                 src_idx_patch, tgt_idx_patch = collated['pairs'][bi, si, pi, :]
+    #                 src_idx_all, tgt_idx_all = idx_maps[bi][src_idx_patch], idx_maps[bi][tgt_idx_patch]
+    #                 edge_score = topo_scores[bi, si, pi]
+    #                 assert 0.0 <= edge_score <= 1.0
+    #                 edge_scores[(src_idx_all, tgt_idx_all)] += edge_score
+    #                 edge_counts[(src_idx_all, tgt_idx_all)] += 1.0
 
-    # avg edge scores and filter
-    pred_edges = []
-    for edge, score_sum in edge_scores.items():
-        score = score_sum / edge_counts[edge] 
-        if score > config.TOPO_THRESHOLD:
-            pred_edges.append(edge)
-    pred_edges = np.array(pred_edges).reshape(-1, 2)
-    pred_nodes = graph_points[:, ::-1]  # to rc
+    # # avg edge scores and filter
+    # pred_edges = []
+    # for edge, score_sum in edge_scores.items():
+    #     score = score_sum / edge_counts[edge] 
+    #     if score > config.TOPO_THRESHOLD:
+    #         pred_edges.append(edge)
+    # pred_edges = np.array(pred_edges).reshape(-1, 2)
+    # pred_nodes = graph_points[:, ::-1]  # to rc
     
     
 
-    return pred_nodes, pred_edges, fused_keypoint_mask, fused_road_mask
+    # return pred_nodes, pred_edges, fused_keypoint_mask, fused_road_mask
+    return fused_keypoint_mask
 
     
 
@@ -271,6 +289,8 @@ if __name__ == "__main__":
     total_inference_seconds = 0.0
 
     num_processd = 0
+    
+    test_img_indices = [49, 179]
     for img_id in test_img_indices:
         print(f'Processing {img_id}')
         # [H, W, C] RGB
@@ -278,23 +298,24 @@ if __name__ == "__main__":
         start_seconds = time.time()
         # coords in (r, c)
         try:
-            pred_nodes, pred_edges, itsc_mask, road_mask = infer_one_img(net, img, config)
+            # pred_nodes, pred_edges, itsc_mask, road_mask = infer_one_img(net, img, config, img_id)
+            keypoint_mask = infer_one_img(net, img, config, img_id)
         except Exception as e:
-            print(f"Error happens, which may due to no point were extracted! img: {img_id}")
+            print(e)
             continue
         end_seconds = time.time()
         total_inference_seconds += (end_seconds - start_seconds)
 
-        gt_graph_path = gt_graph_pattern.format(img_id)
-        gt_graph = pickle.load(open(gt_graph_path, "rb"))
-        gt_nodes, gt_edges = graph_utils.convert_from_sat2graph_format(gt_graph)
-        if len(gt_nodes) == 0:
-            gt_nodes = np.zeros([0, 2], dtype=np.float32)
+        # gt_graph_path = gt_graph_pattern.format(img_id)
+        # gt_graph = pickle.load(open(gt_graph_path, "rb"))
+        # gt_nodes, gt_edges = graph_utils.convert_from_sat2graph_format(gt_graph)
+        # if len(gt_nodes) == 0:
+        #     gt_nodes = np.zeros([0, 2], dtype=np.float32)
 
-        if config.DATASET == 'spacenet':
-            # convert ??? -> xy -> rc
-            gt_nodes = np.stack([gt_nodes[:, 1], 400 - gt_nodes[:, 0]], axis=1)
-            gt_nodes = gt_nodes[:, ::-1]
+        # if config.DATASET == 'spacenet':
+        #     # convert ??? -> xy -> rc
+        #     gt_nodes = np.stack([gt_nodes[:, 1], 400 - gt_nodes[:, 0]], axis=1)
+        #     gt_nodes = gt_nodes[:, ::-1]
 
         # RGB already
         viz_img = np.copy(img)
@@ -304,8 +325,8 @@ if __name__ == "__main__":
         mask_save_dir = os.path.join(output_dir, 'mask')
         if not os.path.exists(mask_save_dir):
             os.makedirs(mask_save_dir)
-        cv2.imwrite(os.path.join(mask_save_dir, f'{img_id}_road.png'), road_mask)
-        cv2.imwrite(os.path.join(mask_save_dir, f'{img_id}_itsc.png'), itsc_mask)
+        # cv2.imwrite(os.path.join(mask_save_dir, f'{img_id}_road.png'), road_mask)
+        cv2.imwrite(os.path.join(mask_save_dir, f'{img_id}_keypoint.png'), keypoint_mask)
 
         # # Visualizes the diff between rasterized pred/gt graphs.
         # rast_pred = triage.rasterize_graph(pred_nodes / img_size, pred_edges, img_size, dilation_radius=1)
@@ -327,24 +348,23 @@ if __name__ == "__main__":
         # cv2.imwrite(os.path.join(diff_save_dir, f'{img_id}.png'), diff_img)
 
         # Visualizes merged large map
-        viz_save_dir = os.path.join(output_dir, 'viz')
-        if not os.path.exists(viz_save_dir):
-            os.makedirs(viz_save_dir)
-        
-        viz_img = triage.visualize_image_and_graph(viz_img, pred_nodes / img_size, pred_edges, viz_img.shape[0])
-        cv2.imwrite(os.path.join(viz_save_dir, f'{img_id}.png'), viz_img)
+        # viz_save_dir = os.path.join(output_dir, 'viz')
+        # if not os.path.exists(viz_save_dir):
+        #     os.makedirs(viz_save_dir)
+        # viz_img = triage.visualize_image_and_graph(viz_img, pred_nodes / img_size, pred_edges, viz_img.shape[0])
+        # cv2.imwrite(os.path.join(viz_save_dir, f'{img_id}.png'), viz_img)
 
         # Saves the large map
-        if config.DATASET == 'spacenet':
-            # r, c -> ???
-            pred_nodes = np.stack([400 - pred_nodes[:, 0], pred_nodes[:, 1]], axis=1)
-        large_map_sat2graph_format = graph_utils.convert_to_sat2graph_format(pred_nodes, pred_edges)
-        graph_save_dir = os.path.join(output_dir, 'graph')
-        if not os.path.exists(graph_save_dir):
-            os.makedirs(graph_save_dir)
-        graph_save_path = os.path.join(graph_save_dir, f'{img_id}.p')
-        with open(graph_save_path, 'wb') as file:
-            pickle.dump(large_map_sat2graph_format, file)
+        # if config.DATASET == 'spacenet':
+        #     # r, c -> ???
+        #     pred_nodes = np.stack([400 - pred_nodes[:, 0], pred_nodes[:, 1]], axis=1)
+        # large_map_sat2graph_format = graph_utils.convert_to_sat2graph_format(pred_nodes, pred_edges)
+        # graph_save_dir = os.path.join(output_dir, 'graph')
+        # if not os.path.exists(graph_save_dir):
+        #     os.makedirs(graph_save_dir)
+        # graph_save_path = os.path.join(graph_save_dir, f'{img_id}.p')
+        # with open(graph_save_path, 'wb') as file:
+        #     pickle.dump(large_map_sat2graph_format, file)
         
         num_processd += 1
         print(f'Done for {img_id}.')

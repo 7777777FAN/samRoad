@@ -290,14 +290,14 @@ class SAMRoad(pl.LightningModule):
         #### GTE_decoder
         activation = nn.GELU
         self.GTE_decoder =  nn.Sequential(
-                nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
-                LayerNorm2d(128),
+                nn.ConvTranspose2d(encoder_output_dim, 256, kernel_size=2, stride=2),
+                LayerNorm2d(256),
+                activation(),
+                nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
                 activation(),
                 nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
                 activation(),
-                nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
-                activation(),
-                nn.ConvTranspose2d(32, 19, kernel_size=2, stride=2),
+                nn.ConvTranspose2d(64, 19, kernel_size=2, stride=2),
             )
         
         #### TOPONet
@@ -362,7 +362,7 @@ class SAMRoad(pl.LightningModule):
         self.adj_prob_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
 
         #### Metrics
-        self.keypoint_iou = BinaryJaccardIndex(threshold=0.5)
+        self.keypoint_iou = BinaryJaccardIndex(threshold=0.1)
         # self.road_iou = BinaryJaccardIndex(threshold=0.5)
         # self.topo_f1 = F1Score(task='binary', threshold=0.5, ignore_index=-1)
         # testing only, not used in training
@@ -506,10 +506,14 @@ class SAMRoad(pl.LightningModule):
         GTE_logits = self.GTE_decoder(image_embeddings)
         GTE_logits = GTE_logits.permute(0, 2, 3, 1) # -> BHWC
         
-        # [B, H, W, 2]
-        # mask_scores = mask_scores.permute(0, 2, 3, 1)
-        # return mask_scores, 
-        return GTE_logits
+        # logits -> scores
+        keypoint_scores = torch.sigmoid(GTE_logits[..., 0])
+        edgeness_scores = torch.sigmoid(GTE_logits[...,1::3])
+        GTE_logits[..., 0] = keypoint_scores
+        GTE_logits[...,1::3] = edgeness_scores
+        GTE_scores = GTE_logits
+        
+        return GTE_scores
     
 
     def infer_toponet(self, image_embeddings, graph_points, pairs, valid):
@@ -530,23 +534,27 @@ class SAMRoad(pl.LightningModule):
         # rgb, keypoint_mask, road_mask= batch['rgb'], batch['keypoint_mask'], batch['road_mask']
         rgb, GTE = batch['rgb'], batch['GTE']
         # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
-
+        B, H, W, C = GTE.shape
         # [B, H, W, 2]
         # mask_logits, mask_scores, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
         GTE_logits = self(rgb)
-        weight_mask = GTE[:, :, :, 0].unsqueeze(-1)   # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
-        weight_mask = torch.clip(weight_mask-0.01, 0, 0.99) + 0.01
+        weight_mask = GTE[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
+        weight_mask = (torch.clip(weight_mask-0.01, 0, 0.99) + 0.01).reshape(B, H, W)
         
-        # gt_masks = torch.stack([keypoint_mask, road_mask], dim=3)
-        gt_keypoint_probs  = GTE[:, :, :, 0]  
-        gt_adj_probs = GTE[:, :, :, 1::3]
+        # keypoint prob loss
+        gt_keypoint_probs  = GTE[:, :, :, 0]
         pred_keypoint_probs_logits = GTE_logits[:, :, :, 0]
-        pred_ajd_probs_logits = GTE_logits[:, :, :, 1::3]
-        
         keypoint_prob_loss = self.mask_criterion(pred_keypoint_probs_logits, gt_keypoint_probs)
-        adj_prob_loss = self.adj_prob_criterion(pred_ajd_probs_logits, gt_adj_probs)*weight_mask
-        adj_prob_loss = adj_prob_loss.sum() / weight_mask.sum()
         
+        # adj prob loss
+        adj_prob_loss = 0
+        for j in range(self.max_degree):
+            pred_ajd_probs_logits = GTE_logits[:, :, :, 1+3*j]  # [B, H, W]
+            gt_adj_probs = GTE[:, :, :, 1+3*j]
+            adj_prob_loss += (self.adj_prob_criterion(pred_ajd_probs_logits, gt_adj_probs)*weight_mask).mean()
+        adj_prob_loss /= self.max_degree        # 一个扇区一个扇区分开算的，所以要除一下
+        
+        # coord loss
         coord_pick = torch.zeros((19,)).to(torch.bool)
         for j in range(self.max_degree):
             coord_pick[1+3*j+1], coord_pick[1+3*j+2] = True, True
@@ -556,6 +564,7 @@ class SAMRoad(pl.LightningModule):
         gt_coords = GTE[coord_pick].permute(1, 2, 3, 0) 
         # [B, H, W, 2*6]
         coord_loss = self.coord_criterion(pred_coords, gt_coords)
+        # coord_loss /= self.max_degree     # 所有扇区一起算的，所以不除
         
         #### DEBUG NAN
         # for nan_index in torch.nonzero(torch.isnan(coord_loss[:, :, :, 0])):
@@ -566,24 +575,8 @@ class SAMRoad(pl.LightningModule):
             pdb.set_trace()
         #### DEBUG NAN
         
-        coord_loss *= weight_mask
-        coord_loss = coord_loss.sum() / weight_mask.sum()
-        
-        # mask_loss = self.mask_criterion(mask_logits, gt_masks)
-
-        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
-        # [B, N_samples, N_pairs, 1]
-        # topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
-
-        # topo_loss *= topo_loss_mask.unsqueeze(-1)
-        # topo_loss = torch.nansum(torch.nansum(topo_loss) / topo_loss_mask.sum())
-        # topo_loss = topo_loss.sum() / topo_loss_mask.sum()
-
-        # loss = mask_loss + topo_loss
-        loss = keypoint_prob_loss + adj_prob_loss*10 + coord_loss*100
-        # self.log('train_mask_loss', mask_loss, on_step=True, on_epoch=False, prog_bar=True)
-        # self.log('train_topo_loss', topo_loss, on_step=True, on_epoch=False, prog_bar=True)
-        # self.log('train_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
+        coord_loss = (coord_loss*weight_mask.reshape(B, H, W, 1)).mean()
+        loss = keypoint_prob_loss + adj_prob_loss*10.0 + coord_loss*1000.0
         
         self.log('train_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log('train_adj_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
@@ -595,62 +588,55 @@ class SAMRoad(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         # masks: [B, H, W]
-        # rgb, keypoint_mask, road_mask = batch['rgb'], batch['keypoint_mask'], batch['road_mask']
-        # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
+        # rgb, keypoint_mask, road_mask= batch['rgb'], batch['keypoint_mask'], batch['road_mask']
         rgb, GTE = batch['rgb'], batch['GTE']
-
-        # masks: [B, H, W, 2] topo: [B, N_samples, N_pairs, 1]
+        # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
+        B, H, W, C = GTE.shape
+        # [B, H, W, 2]
         # mask_logits, mask_scores, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
         GTE_logits = self(rgb)
-        weight_mask = GTE[:, :, :, 0].unsqueeze(-1)   # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
-        weight_mask = torch.clip(weight_mask-0.01, 0, 0.99) + 0.01
-
-        # gt_masks = torch.stack([keypoint_mask, road_mask], dim=3)
-        gt_keypoint_probs  = GTE[:, :, :, 0]  
-        gt_adj_probs = GTE[:, :, :, 1::3]
+        weight_mask = GTE_logits[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
+        weight_mask = (torch.clip(weight_mask-0.01, 0, 0.99) + 0.01).reshape(B, H, W)
+        
+        # keypoint prob loss
+        gt_keypoint_probs  = GTE[:, :, :, 0]
         pred_keypoint_probs_logits = GTE_logits[:, :, :, 0]
         pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
-        pred_ajd_probs_logits = GTE_logits[:, :, :, 1::3]
-        
         keypoint_prob_loss = self.mask_criterion(pred_keypoint_probs_logits, gt_keypoint_probs)
-        adj_prob_loss = self.adj_prob_criterion(pred_ajd_probs_logits, gt_adj_probs)*weight_mask
-        adj_prob_loss = adj_prob_loss.sum() / weight_mask.sum()
         
+        # adj prob loss
+        adj_prob_loss = 0
+        for j in range(self.max_degree):
+            pred_ajd_probs_logits = GTE_logits[:, :, :, 1+3*j]  # [B, H, W]
+            gt_adj_probs = GTE[:, :, :, 1+3*j]
+            adj_prob_loss += (self.adj_prob_criterion(pred_ajd_probs_logits, gt_adj_probs)*weight_mask).mean()
+        adj_prob_loss /= self.max_degree        # 一个扇区一个扇区分开算的，所以要除一下
+        
+        # coord loss
         coord_pick = torch.zeros((19,)).to(torch.bool)
         for j in range(self.max_degree):
             coord_pick[1+3*j+1], coord_pick[1+3*j+2] = True, True
         GTE = GTE.permute(3, 0, 1, 2)   # BHWC -> CBHW
         GTE_logits = GTE_logits.permute(3, 0, 1, 2)
         pred_coords = GTE_logits[coord_pick].permute(1, 2, 3, 0)    # CBHW ->BHWC
-        gt_coords = GTE[coord_pick].permute(1, 2, 3, 0)  
+        gt_coords = GTE[coord_pick].permute(1, 2, 3, 0) 
         # [B, H, W, 2*6]
-        coord_loss = self.coord_criterion(pred_coords, gt_coords)
-        coord_loss *= weight_mask
-        coord_loss = coord_loss.sum() / weight_mask.sum()
+        coord_loss = (self.coord_criterion(pred_coords, gt_coords)*weight_mask.reshape(B, H, W, 1)).mean()
+        # coord_loss /= self.max_degree     # 所有扇区一起算的，所以不除
         
-        # mask_loss = self.mask_criterion(mask_logits, gt_masks)
-
-        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
-        # # [B, N_samples, N_pairs, 1]
-        # topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
-        # topo_loss *= topo_loss_mask.unsqueeze(-1)
-        # topo_loss = topo_loss.sum() / topo_loss_mask.sum()
-        # loss = mask_loss + topo_loss
+        loss = keypoint_prob_loss + adj_prob_loss*10.0 + coord_loss*1000.0
         
-        loss = keypoint_prob_loss + adj_prob_loss*10 + coord_loss*100
-        # self.log('val_mask_loss', mask_loss, on_step=False, on_epoch=True, prog_bar=True)
-        # self.log('val_topo_loss', topo_loss, on_step=False, on_epoch=True, prog_bar=True)
-        # self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('train_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('train_ad_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('train_coord_loss', coord_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('train_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
+        
+        self.log('val_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
+        self.log('val_adj_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
+        self.log('val_coord_loss', coord_loss, on_step=True, on_epoch=False, prog_bar=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
         
         # Log images
         if batch_idx == 0:
             max_viz_num = 4
-            viz_rgb = rgb[:max_viz_num, :, :]
-            viz_pred_keypoint = pred_keypoint_probs[:max_viz_num, :, :]
+            viz_rgb = rgb[:max_viz_num, ...]
+            viz_pred_keypoint = pred_keypoint_probs[:max_viz_num, ...]
             # viz_pred_road = mask_scores[:max_viz_num, :, :, 1]
             viz_gt_keypoint = gt_keypoint_probs[:max_viz_num, ...]
             # viz_gt_road = road_mask[:max_viz_num, ...]
@@ -661,23 +647,15 @@ class SAMRoad(pl.LightningModule):
             self.logger.log_table(key='viz_table', columns=columns, data=data)
 
         self.keypoint_iou.update(pred_keypoint_probs, gt_keypoint_probs)
-        # self.road_iou.update(mask_scores[..., 1], road_mask)
-        
-        # valid = valid.to(torch.int32)
-        # topo_gt = (1 - valid) * -1 + valid * topo_gt
-        # self.topo_f1.update(topo_scores, topo_gt.unsqueeze(-1))
         
 
     def on_validation_epoch_end(self):
         keypoint_iou = self.keypoint_iou.compute()
-        # road_iou = self.road_iou.compute()
-        # topo_f1 = self.topo_f1.compute()
+
         self.log("keypoint_iou", keypoint_iou)
-        # self.log("road_iou", road_iou)
-        # self.log("topo_f1", topo_f1)
+
         self.keypoint_iou.reset()
-        # self.road_iou.reset()
-        # self.topo_f1.reset()
+
 
     def test_step(self, batch, batch_idx):
         # masks: [B, H, W]
@@ -693,17 +671,9 @@ class SAMRoad(pl.LightningModule):
         pred_keypoint_probs_logits = GTE_logits[:, :, :, 0]
         pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
         
-        # masks: [B, H, W, 2] topo: [B, N_samples, N_pairs, 1]
-        # mask_logits, mask_scores, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
 
-        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
+        self.keypoint_pr_curve.update(pred_keypoint_probs, gt_keypoint_probs.to(torch.int32))
 
-        self.keypoint_pr_curve.update(pred_keypoint_probs[..., 0], gt_keypoint_probs.to(torch.int32))
-        # self.road_pr_curve.update(mask_scores[..., 1], road_mask.to(torch.int32))
-        
-        # valid = valid.to(torch.int32)
-        # topo_gt = (1 - valid) * -1 + valid * topo_gt
-        # self.topo_pr_curve.update(topo_scores, topo_gt.unsqueeze(-1).to(torch.int32))
 
     def on_test_end(self):
         def find_best_threshold(pr_curve_metric, category):
@@ -719,8 +689,7 @@ class SAMRoad(pl.LightningModule):
         
         print('======= Finding best thresholds ======')
         find_best_threshold(self.keypoint_pr_curve, 'keypoint')
-        # find_best_threshold(self.road_pr_curve, 'road')
-        # find_best_threshold(self.topo_pr_curve, 'topo')
+
 
 
     def configure_optimizers(self):
@@ -775,7 +744,7 @@ class SAMRoad(pl.LightningModule):
         # optimizer = torch.optim.AdamW(param_dicts, lr=self.config.BASE_LR, betas=(0.9, 0.999), weight_decay=0.1)
         optimizer = torch.optim.Adam(param_dicts, lr=self.config.BASE_LR)
         # warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=10)
-        step_lr = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[9,], gamma=0.1)
+        step_lr = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[9, 40], gamma=0.1)
         return {'optimizer': optimizer, 'lr_scheduler': step_lr}
     
     
