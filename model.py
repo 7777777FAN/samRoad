@@ -601,8 +601,8 @@ class SAMRoad(pl.LightningModule):
         # keypoint prob loss
         gt_keypoint_probs  = GTE[:, :, :, 0]
         pred_keypoint_probs_logits = GTE_logits[:, :, :, 0]
-        pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
         keypoint_prob_loss = self.mask_criterion(pred_keypoint_probs_logits, gt_keypoint_probs)
+        pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
         
         # adj prob loss
         adj_prob_loss = 0
@@ -627,10 +627,10 @@ class SAMRoad(pl.LightningModule):
         loss = keypoint_prob_loss + adj_prob_loss*10.0 + coord_loss*1000.0
         
         
-        self.log('val_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_adj_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_coord_loss', coord_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
+        self.log('val_keypoint_prob_loss', keypoint_prob_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_adj_prob_loss', adj_prob_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_coord_loss', coord_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_loss', loss, on_step=False, on_epoch=False, prog_bar=True)
         
         # Log images
         if batch_idx == 0:

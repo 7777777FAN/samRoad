@@ -24,9 +24,16 @@ NUM_THREAD = 10
  
 
 
+def create_dir(dir, exist_ok=True):
+    if os.path.exists(dir):
+        if exist_ok:
+            return
+        else:
+            shutil.rmtree(dir)
+    else:
+        os.makedirs(dir, exist_ok=False)
 
-
-def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_index=0):
+def vis_GT_GTE(GTE, verify_dir, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_index=0):
     vis_output = np.zeros((IMG_SIZE, IMG_SIZE, 3))    # 不加底图
     # vis_output = cv.imread(rgb_pattern.format(7))[:, :, :]
     sub_GTE = torch.tensor(GTE[:, :, :], dtype=torch.float32)
@@ -85,22 +92,24 @@ def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_
 
 
 rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
-GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
+GTE_logits_pattern = './save/GTE_加了噪声_59epoch/GTE_logits/region_{}_GTE_logits.npz'
 data_split_path = './cityscale/data_split.json'
+output_dir = './save/GTE_加了噪声_59epoch/decode_result'
+create_dir(output_dir)
 
-test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
+# test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
 
-# test_tile_idxes = [49, 179]
+test_tile_idxes = [49, 179]
 for idx in tqdm(test_tile_idxes):
     GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
 
     # 可视化，用于检验自己的编码是否正确以及预测结果是否正确（暂不论结果好坏）
-    verify_dir = './save/修正损失计算重训/verify'
+    # verify_dir = './save/GTE_加了噪声/verify'
     # if osp.exists(verify_dir):
     #     shutil.rmtree(verify_dir)
     # os.makedirs(verify_dir)
-    # vis_GT_GTE(GTE, aug=False)
+    # vis_GT_GTE(GTE, verify_dir=verify_dir, aug=False)
 
     # 用Sat2Graph的解码算法解码
-    output_file = f'./save/修正损失计算重训/decode_result/region_{idx}'
+    output_file = os.path.join(output_dir, f"region_{idx}")
     DecodeAndVis(GTE, output_file, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)

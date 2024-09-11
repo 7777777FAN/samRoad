@@ -2,7 +2,7 @@
 declare -a arr=(49 179)
 
 # source directory
-dir=./save/修正损失计算重训/decode_result
+dir=./save/GTE_加了噪声_59epoch/decode_result
 
 echo "预测结果保存路径：${dir}"
 mkdir -p ../$dir/results/apls
