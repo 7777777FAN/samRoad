@@ -576,7 +576,7 @@ class SAMRoad(pl.LightningModule):
         #### DEBUG NAN
         
         coord_loss = (coord_loss*weight_mask.reshape(B, H, W, 1)).mean()
-        loss = keypoint_prob_loss + adj_prob_loss*10.0 + coord_loss*1000.0
+        loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0
         
         self.log('train_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log('train_adj_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
@@ -627,10 +627,10 @@ class SAMRoad(pl.LightningModule):
         loss = keypoint_prob_loss + adj_prob_loss*10.0 + coord_loss*1000.0
         
         
-        self.log('val_keypoint_prob_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_adj_prob_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_coord_loss', coord_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
+        self.log('val_keypoint_prob_loss', keypoint_prob_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_adj_prob_loss', adj_prob_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_coord_loss', coord_loss, on_step=False, on_epoch=False, prog_bar=True)
+        self.log('val_loss', loss, on_step=False, on_epoch=False, prog_bar=True)
         
         # Log images
         if batch_idx == 0:

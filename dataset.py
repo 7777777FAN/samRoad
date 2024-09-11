@@ -361,6 +361,8 @@ class SatMapDataset(Dataset):
         
         self.sample_min = self.SAMPLE_MARGIN
         self.sample_max = self.IMAGE_SIZE - (self.config.PATCH_SIZE + self.SAMPLE_MARGIN)
+        
+        self.noise_mask = (np.random.rand(64,64,3)) * 1.0 + 0.5
 
         if not self.is_train:
             eval_patches_per_edge = math.ceil((self.IMAGE_SIZE - 2 * self.SAMPLE_MARGIN) / self.config.PATCH_SIZE)  # 这句代码使得在首尾抠除margin大小后，eval时只有除不尽时才会有重叠，不够的部分会靠均匀地重叠来达成
@@ -423,6 +425,22 @@ class SatMapDataset(Dataset):
             rgb_patch = np.rot90(rgb_patch, rot_index, [0,1]).copy()
             GTE_patch = np.rot90(GTE_patch, rot_index, [0, 1]).copy()
             
+            # 图片加点噪声
+            if np.random.randint(0, 100) < 50:
+                for _ in range(np.random.randint(1,5)):
+                    xx = np.random.randint(0,self.config.PATCH_SIZE-64-1)
+                    yy = np.random.randint(0,self.config.PATCH_SIZE-64-1)
+
+                    rgb_patch[xx:xx+64,yy:yy+64,:] = np.multiply(rgb_patch[xx:xx+64,yy:yy+64,:] + 0.5, self.noise_mask) - 0.5
+                
+				# add more noise 
+                for _ in range(np.random.randint(1,3)):
+                    xx = np.random.randint(0,self.config.PATCH_SIZE-64-1)
+                    yy = np.random.randint(0,self.config.PATCH_SIZE-64-1)
+
+                    rgb_patch[xx:xx+64,yy:yy+64,:] =  (self.noise_mask - 1.0) 
+            
+            
             # dx, dy的变换
             # rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
             #             [math.cos(math.pi/2), math.sin(math.pi/2)],
@@ -450,7 +468,6 @@ class SatMapDataset(Dataset):
             'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
             'GTE': torch.tensor(GTE_patch, dtype=torch.float32),
         }
-
 
 if __name__ == '__main__':
     test_graph_label_generator()
