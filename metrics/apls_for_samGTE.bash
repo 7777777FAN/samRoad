@@ -1,5 +1,5 @@
-# declare -a arr=(8 9 19 28 29 39 48 49 59 68 69 79 88 89 99 108 109 119 128 129 139 148 149 159 168 169 179)
-declare -a arr=(49 179)
+declare -a arr=(8 9 19 28 29 39 48 49 59 68 69 79 88 89 99 108 109 119 128 129 139 148 149 159 168 169 179)
+# declare -a arr=(49 179)
 
 # source directory
 dir=./save/GTE_加了噪声_59epoch/decode_result
