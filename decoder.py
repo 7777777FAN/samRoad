@@ -491,6 +491,7 @@ def DecodeAndVis(imagegraph,
                  thr=0.5, 
                  edge_thr = 0.5, 
                  snap=False, 
+                 learnable_topo=True,
                  kp_limit = 500, 
                  drop=True, 
                  use_graph_refine=True, 
@@ -916,7 +917,8 @@ def DecodeAndVis(imagegraph,
 	Image.fromarray(rgb).save(filename+"_imagegraph.png")
 	Image.fromarray(rgb2).save(filename+"_intersection_node.png")
 
-	pickle.dump(graph, open(filename+"_graph.p","wb"))
+	if not learnable_topo:	# 可学习的话就会另外输出graph
+		pickle.dump(graph, open(filename+"_graph.p","wb"))
 
 	return graph
 

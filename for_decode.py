@@ -25,7 +25,6 @@ NUM_THREAD = 10
 
 
 
-
 def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_index=0):
     vis_output = np.zeros((IMG_SIZE, IMG_SIZE, 3))    # 不加底图
     # vis_output = cv.imread(rgb_pattern.format(7))[:, :, :]
@@ -79,28 +78,26 @@ def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_
     
 
 
+if '__main__' == __name__:
+    
+    rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
+    GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
+    data_split_path = './cityscale/data_split.json'
 
+    test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
 
+    # test_tile_idxes = [49, 179]
+    for idx in tqdm(test_tile_idxes):
+        GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
 
+        # 可视化，用于检验自己的编码是否正确以及预测结果是否正确（暂不论结果好坏）
+        verify_dir = './save/修正损失计算重训/verify'
+        # if osp.exists(verify_dir):
+        #     shutil.rmtree(verify_dir)
+        # os.makedirs(verify_dir)
+        # vis_GT_GTE(GTE, aug=False)
 
-
-rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
-GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
-data_split_path = './cityscale/data_split.json'
-
-# test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
-
-test_tile_idxes = [49, 179]
-for idx in tqdm(test_tile_idxes):
-    GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
-
-    # 可视化，用于检验自己的编码是否正确以及预测结果是否正确（暂不论结果好坏）
-    verify_dir = './save/修正损失计算重训/verify'
-    # if osp.exists(verify_dir):
-    #     shutil.rmtree(verify_dir)
-    # os.makedirs(verify_dir)
-    # vis_GT_GTE(GTE, aug=False)
-
-    # 用Sat2Graph的解码算法解码
-    output_file = f'./save/修正损失计算重训/decode_result/region_{idx}'
-    DecodeAndVis(GTE, output_file, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
+        # 用Sat2Graph的解码算法解码
+        output_file = f'./save/修正损失计算重训/decode_result/region_{idx}'
+        # 普通解码
+        DecodeAndVis(GTE, output_file, learnable_topo=False, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)

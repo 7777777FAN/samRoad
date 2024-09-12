@@ -46,7 +46,7 @@ if __name__ == "__main__":
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
-        project="sam_road_GTE",
+        project="sam_road_GTE_with_learnable_topo_decoder",
         # track hyperparameters and run metadata
         config=config,
         # disable wandb if debugging

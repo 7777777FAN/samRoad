@@ -329,7 +329,7 @@ class SatMapDataset(Dataset):
 
             # coord-transform = (r, c) -> (x, y)
             # takes [N, 2] points
-            coord_transform = lambda v : v[:, ::-1]
+            self.coord_transform = lambda v : v[:, ::-1]
 
         self.is_train = is_train
 
@@ -367,10 +367,10 @@ class SatMapDataset(Dataset):
         if not self.is_train:
             eval_patches_per_edge = math.ceil((self.IMAGE_SIZE - 2 * self.SAMPLE_MARGIN) / self.config.PATCH_SIZE)  # 这句代码使得在首尾抠除margin大小后，eval时只有除不尽时才会有重叠，不够的部分会靠均匀地重叠来达成
             self.eval_patches = []
-            for i in range(len(tile_indices)):
+            for i in range(len(self.tile_indices)):
                 self.eval_patches += get_patch_info_one_img(
                     i, self.IMAGE_SIZE, self.SAMPLE_MARGIN, self.config.PATCH_SIZE, eval_patches_per_edge
-                )
+                )   
 
 
     def load_data(self):
@@ -378,9 +378,16 @@ class SatMapDataset(Dataset):
             print(f'loading tile {tile_idx}')
             rgb_path = self.rgb_pattern.format(tile_idx)
             GTE_path = self.GTE_pattern.format(tile_idx)
+            gt_graph_adj = pickle.load(open(self.gt_graph_pattern.format(tile_idx),'rb'))    # 为新增的可学习的topo-decoder构造训练数据
+            if len(gt_graph_adj) == 0:
+                print(f" ======== skip empty tile {tile_idx} ========")
+                continue
             
+            graph_label_generator = GraphLabelGenerator(config=self.config, full_graph=gt_graph_adj, coord_transform=self.coord_transform)
             self.rgbs.append(read_rgb_img(rgb_path))  
             self.GTEs.append(np.load(GTE_path)['GTE'])
+            self.graph_label_generators.append(graph_label_generator)
+
 
     def set_tileindex_range(self, intact=True, start=0, end=0):
         if intact:
@@ -395,7 +402,9 @@ class SatMapDataset(Dataset):
         if self.is_train:
             # Pixel seen in one epoch ~ 17 x total pixels in training set
             if self.config.DATASET == 'cityscale':
-                return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500 
+                return 64
+                # return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500 
+                
             elif self.config.DATASET == 'spacenet':
                 return 84667
         else:
@@ -439,8 +448,6 @@ class SatMapDataset(Dataset):
                     yy = np.random.randint(0,self.config.PATCH_SIZE-64-1)
 
                     rgb_patch[xx:xx+64,yy:yy+64,:] =  (self.noise_mask - 1.0) 
-            
-            
             # dx, dy的变换
             # rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
             #             [math.cos(math.pi/2), math.sin(math.pi/2)],
@@ -462,11 +469,21 @@ class SatMapDataset(Dataset):
                 
                 for j in range(self.max_degree):    # stick back
                     GTE_patch[r, c, 1+3*j+1], GTE_patch[r, c, 1+3*j+2] = roted_coords[:, j]
+                    
+        patch = ((begin_x, begin_y), (end_x, end_y))
+        graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)
+        pairs, connected, valid = zip(*topo_samples)
             
             
         return {
+            # GTE
             'rgb': torch.tensor(rgb_patch, dtype=torch.float32),
             'GTE': torch.tensor(GTE_patch, dtype=torch.float32),
+            # topo
+            'graph_points': torch.tensor(graph_points, dtype=torch.float32),
+            'pairs': torch.tensor(pairs, dtype=torch.int32),
+            'connected': torch.tensor(connected, dtype=torch.bool),
+            'valid': torch.tensor(valid, dtype=torch.bool),
         }
 
 if __name__ == '__main__':
