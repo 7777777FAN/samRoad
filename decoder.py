@@ -9,6 +9,7 @@ from rtree import index
 import sys 
 import pickle 
 from common import * 
+from douglasPeucker import simpilfyGraph
 
 
 vector_norm = 25.0 
@@ -918,7 +919,9 @@ def DecodeAndVis(imagegraph,
 	Image.fromarray(rgb).save(filename+"_imagegraph.png")
 	Image.fromarray(rgb2).save(filename+"_intersection_node.png")
 
-	pickle.dump(graph, open(filename+"_graph.p","wb"))
+	pickle.dump(graph, open(filename+"_graph_nosimplify.p","wb"))
+	graph = simpilfyGraph(graph)
+	pickle.dump(graph, open(filename+"_graph_simplified.p","wb"))
 
 	return graph
 
