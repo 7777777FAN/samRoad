@@ -88,8 +88,10 @@ for tile_index in range(180):
     # Collect key nodes (degree != 2)
     key_nodes = []
     for node, degree in graph.degree():
-        if degree != 2:
-            key_nodes.append(node)
+        # if degree != 2:
+        #     key_nodes.append(node)
+        key_nodes.append(node)
+    # print(len(key_nodes))
 
     # Create key point mask
     keypoint_mask = draw_points_on_image(size=IMAGE_SIZE, points=key_nodes, radius=KEYPOINT_RADIUS)

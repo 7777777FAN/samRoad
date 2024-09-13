@@ -237,6 +237,7 @@ def infer_one_img(net, img, config):
 
 
 if __name__ == "__main__":
+    from tqdm import tqdm
     config = load_config(args.config)
     
     # Builds eval model    
@@ -269,9 +270,10 @@ if __name__ == "__main__":
         output_dir = create_output_dir_and_save_config(output_dir_prefix, config)
     
     total_inference_seconds = 0.0
-
-    for img_id in test_img_indices:
-        print(f'Processing {img_id}')
+    
+    print(' ======== Inferencing ========')
+    for img_id in tqdm(test_img_indices):
+        # print(f'Processing {img_id}')
         # [H, W, C] RGB
         img = read_rgb_img(rgb_pattern.format(img_id))
         start_seconds = time.time()
@@ -340,7 +342,7 @@ if __name__ == "__main__":
         with open(graph_save_path, 'wb') as file:
             pickle.dump(large_map_sat2graph_format, file)
         
-        print(f'Done for {img_id}.')
+    print(' ======== Inferencing Done! ========')
     
     # log inference time
     time_txt = f'Inference completed for {args.config} in {total_inference_seconds} seconds.'

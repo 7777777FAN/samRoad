@@ -8,6 +8,7 @@ from sklearn.neighbors import KDTree
 from skimage.draw import line
 import networkx as nx
 from graph_utils import nms_points
+from skimage import measure
 
 
 IMAGE_SIZE = 2048
@@ -26,6 +27,22 @@ def get_points_and_scores_from_mask(mask, threshold):
     xys = rcs[:, ::-1]
     scores = mask[mask > threshold]
     return xys, scores
+
+
+def get_keypoints_and_scores_from_mask(keypoint_mask, threshold):
+    '''关键点要获取重心坐标，不能直接用NMS'''
+    label = measure.label(keypoint_mask>threshold)
+    region_props = measure.regionprops(label)
+    min_area = 1
+    xys = []
+    scores = []
+    for region in region_props:
+        if region.area > min_area:
+            rc = region.centroid  # 
+            rc = [min(int(x+0.5), 2048) for x in rc]
+            xys.append(rc[::-1])
+            scores.append(keypoint_mask[rc[0], rc[1]])
+    return np.array(xys), np.array(scores)
 
 
 def draw_points_on_image(image, points, radius):
@@ -128,8 +145,10 @@ def create_cost_field_astar(sample_pts, road_mask, block_threshold=200):
 
 
 def extract_graph_points(keypoint_mask, road_mask, config):
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
+    # kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
+    kp_candidates, kp_scores = get_keypoints_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
     kps_0 = nms_points(kp_candidates, kp_scores, config.ITSC_NMS_RADIUS)
+    
     kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255)
     kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     # prioritize intersection points

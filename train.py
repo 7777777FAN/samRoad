@@ -46,7 +46,7 @@ if __name__ == "__main__":
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
-        project="sam_road",
+        project="sam_road_预测等间距关键点",
         # track hyperparameters and run metadata
         config=config,
         # disable wandb if debugging
