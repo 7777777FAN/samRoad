@@ -141,17 +141,20 @@ def create_cost_field_astar(sample_pts, road_mask, block_threshold=200):
 
 
 def extract_graph_points(keypoint_mask, road_mask, config):
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255, keypoint=True, mode='normal')
+    # 原版对应normal模式,我自己改为路面上的点应该位于中心线后模式为center,但是性能有所下降
+    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255, keypoint=True, mode='normal')    
     kps_0 = nms_points(kp_candidates, kp_scores, config.ITSC_NMS_RADIUS)
-    # 道路中心线上的点
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255, keypoint=False, mode='center')
-    kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     # 道路区域上点
     kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255, keypoint=False, mode='normal')
-    kps_2 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    # 道路中心线上的点
+    # kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255, keypoint=False, mode='normal')
+    # kps_2 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     # prioritize intersection points
-    kp_candidates = np.concatenate([kps_0, kps_1, kps_2], axis=0)
-    kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0]))+0.1, np.zeros((kps_2.shape[0]))], axis=0) # np.zeros((kps_1.shape[0]))+0.1是为了以中心线上的点为准，不足的地方才用路面点补充
+    kp_candidates = np.concatenate([kps_0, kps_1], axis=0)
+    kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0]))], axis=0)
+    # kp_candidates = np.concatenate([kps_0, kps_1, kps_2], axis=0)
+    # kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0])), np.zeros((kps_2.shape[0]))+0.1], axis=0) # np.zeros((kps_2.shape[0]))+0.1是为了以中心线上的点为准，不足的地方才用路面点补充
     # 其实此时的kp_scores更像是权重
     kps = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
     return kps

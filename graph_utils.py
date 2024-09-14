@@ -571,7 +571,7 @@ def subdivide_graph(graph, resolution):
 def nms_points(points, scores, radius, return_indices=False):
     # if score > 1.0, the point is forced to be kept regardless
     sorted_indices = np.argsort(scores)[::-1]   # 默认按值从小到大排序，改为从大到小，返回->值的索引
-    sorted_points = points[sorted_indices, :]   # 点坐标 组成的矩阵
+    sorted_points = points[sorted_indices, :]   # 点的rc坐标 组成的矩阵
     sorted_scores = scores[sorted_indices]      # 大于thr的分数 组成的列表
     kept = np.ones(sorted_indices.shape[0], dtype=bool)
     tree = scipy.spatial.KDTree(sorted_points)
@@ -581,9 +581,12 @@ def nms_points(points, scores, radius, return_indices=False):
         # neighbor_indices = tree.query_radius(p[np.newaxis, :], r=radius)[0]
         neighbor_indices = tree.query_ball_point(p, r=radius)
         neighbor_scores = sorted_scores[neighbor_indices]
-        keep_nbr = np.greater(neighbor_scores, 1.0)     
-        # 等价于keep_nbr = neighbor_scores > 1.0    
-        # 这里是相当于把当前点周围的点的保留值设为False，因为这些点的score不可能大于1.0，交叉点会是2就不会被抑制
+        
+        
+        keep_nbr = np.greater(neighbor_scores, 1.0)         # 等价于keep_nbr = neighbor_scores > 1.0       
+        # 上面何惧代码在只对一类点如keypoint或者road上的点进行NMS的时候行为无异,因为score都在01之间
+        # 但是如果是混合NMS,也就是把两类点合在一起NMS时,keypoint始终要被保留,因为在送进来之前,keypoints对应部分的scores全部被设置为了1
+        # 这里是相当于把当前点周围的路面点的保留值设为False，因为这些点的score不可能大于1.0，交叉点会是1就不会被抑制(不过好像要大于1才不会被抑制?)
         kept[neighbor_indices] = keep_nbr
         kept[idx] = True    # 这一句貌似有点多余->不多余，因为后面进行挑选需要数据类型是bool
     if return_indices:

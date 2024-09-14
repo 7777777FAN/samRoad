@@ -11,9 +11,9 @@ mkdir -p ../$dir/results/apls
 if [ $2 == 'simplify' ]; then
     suffix='simplified'
 else
-    suffix='no_simplify'
+    suffix='nosimplify'
 fi
-echo $suffix
+echo "$suffix"
 # now loop through the above array
 for i in "${arr[@]}"   
 
