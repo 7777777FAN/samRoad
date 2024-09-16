@@ -10,7 +10,7 @@ import pickle
 import os
 import addict
 import json
-
+from tqdm import tqdm
 
 
 def read_rgb_img(path):
@@ -82,6 +82,7 @@ class GraphLabelGenerator():
         self.subdivide_resolution = 4
         self.full_graph_subdivide = graph_utils.subdivide_graph(self.full_graph_origin, self.subdivide_resolution) # 将每条边分成4段，密集化
         # np array, maybe faster
+
         self.subdivide_points = np.array(self.full_graph_subdivide.vs['point'])
         # pre-build spatial index
         # rtree for box queries
@@ -125,7 +126,15 @@ class GraphLabelGenerator():
             interesting_indices.update(nearby_indices)
         self.sample_weights = np.full((point_num, ), 0.1, dtype=np.float32)
         self.sample_weights[list(interesting_indices)] = 0.9
+        
+        
+        # 清除一下不要的变量，防止内存不够
+        del self.full_graph_origin, self.crossover_points, \
+            self.graph_kdtree, itsc_indices, \
+            interesting_indices, nearby_indices
     
+    
+        
     def sample_patch(self, patch, rot_index = 0):
         (x0, y0), (x1, y1) = patch
         query_box = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))    # 找到目标矩形的范围（左上、右下）
@@ -233,6 +242,7 @@ class GraphLabelGenerator():
         # Add noise
         noise_scale = 1.0  # pixels
         nmsed_points += np.random.normal(0.0, noise_scale, size=nmsed_points.shape)
+    
 
         return nmsed_points, samples
     
@@ -305,6 +315,7 @@ def graph_collate_fn(batch):
             collated[key] = torch.stack(padded, dim=0)
         else:
             collated[key] = torch.stack([item[key] for item in batch], dim=0)
+    del batch
     return collated
 
 
@@ -374,8 +385,9 @@ class SatMapDataset(Dataset):
 
 
     def load_data(self):
-        for tile_idx in self.tile_indices:
-            print(f'loading tile {tile_idx}')
+        print(" ======== Loading Data ======== ")
+        for tile_idx in tqdm(self.tile_indices):
+            # print(f'loading tile {tile_idx}')
             rgb_path = self.rgb_pattern.format(tile_idx)
             GTE_path = self.GTE_pattern.format(tile_idx)
             gt_graph_adj = pickle.load(open(self.gt_graph_pattern.format(tile_idx),'rb'))    # 为新增的可学习的topo-decoder构造训练数据
@@ -386,7 +398,11 @@ class SatMapDataset(Dataset):
             graph_label_generator = GraphLabelGenerator(config=self.config, full_graph=gt_graph_adj, coord_transform=self.coord_transform)
             self.rgbs.append(read_rgb_img(rgb_path))  
             self.GTEs.append(np.load(GTE_path)['GTE'])
+            # self.rgbs.append(np.zeros((2048, 2048, 3), dtype=np.uint8))  
+            # self.GTEs.append(np.zeros((2048, 2048, 19), dtype=np.float32))
             self.graph_label_generators.append(graph_label_generator)
+            
+            del graph_label_generator
 
 
     def set_tileindex_range(self, intact=True, start=0, end=0):
@@ -402,8 +418,9 @@ class SatMapDataset(Dataset):
         if self.is_train:
             # Pixel seen in one epoch ~ 17 x total pixels in training set
             if self.config.DATASET == 'cityscale':
-                return 64
-                # return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500 
+                if self.config.dev_run:
+                    return 2048
+                return max(1, int(self.IMAGE_SIZE / self.config.PATCH_SIZE)) ** 2 * 2500 
                 
             elif self.config.DATASET == 'spacenet':
                 return 84667
@@ -469,12 +486,15 @@ class SatMapDataset(Dataset):
                 
                 for j in range(self.max_degree):    # stick back
                     GTE_patch[r, c, 1+3*j+1], GTE_patch[r, c, 1+3*j+2] = roted_coords[:, j]
+                
+                # BUG 内存不够用了，试试这能否解决
+                del delta_coords, delta_coords_to_rot, roted_coords
                     
         patch = ((begin_x, begin_y), (end_x, end_y))
         graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)
         pairs, connected, valid = zip(*topo_samples)
-            
-            
+        
+
         return {
             # GTE
             'rgb': torch.tensor(rgb_patch, dtype=torch.float32),

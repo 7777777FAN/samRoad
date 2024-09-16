@@ -390,10 +390,12 @@ class SAMRoad(pl.LightningModule):
                     state_dict_to_load[k] = ckpt_state_dict[k]
                 else:
                     mismatch_names.append(k)
-            print("###### Matched params ######")
-            pprint.pprint(matched_names)
-            print("###### Mismatched params ######")
-            pprint.pprint(mismatch_names)
+            
+            if self.config.dev_run: 
+                print("###### Matched params ######")
+                pprint.pprint(matched_names)
+                print("###### Mismatched params ######")
+                pprint.pprint(mismatch_names)
 
             self.matched_param_names = set(matched_names)
             self.load_state_dict(state_dict_to_load, strict=False)
@@ -539,12 +541,15 @@ class SAMRoad(pl.LightningModule):
         # [B, H, W, 2]
         # 模型输出
         GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
+        
         # GTE_logits = self(rgb)
         # 拓扑损失
+        
         topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
         topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
         topo_loss *= topo_loss_mask.unsqueeze(-1)
         topo_loss = topo_loss.sum() / topo_loss_mask.sum()
+        
         
         # GTE损失
         weight_mask = GTE[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
@@ -577,11 +582,11 @@ class SAMRoad(pl.LightningModule):
         
         #### DEBUG NAN
         # for nan_index in torch.nonzero(torch.isnan(coord_loss[:, :, :, 0])):
-        for nan_index in torch.nonzero(torch.isnan(coord_loss[:, :, :, :])):
-            print('nan index: B, Sample, Pair')
-            print(nan_index)
-            import pdb
-            pdb.set_trace()
+        # for nan_index in torch.nonzero(torch.isnan(coord_loss[:, :, :, :])):
+        #     print('nan index: B, Sample, Pair')
+        #     print(nan_index)
+        #     import pdb
+        #     pdb.set_trace()
         #### DEBUG NAN
         
         coord_loss = (coord_loss*weight_mask.reshape(B, H, W, 1)).mean()
@@ -765,11 +770,11 @@ class SAMRoad(pl.LightningModule):
             }]
         param_dicts += decoder_params
 
-        # topo_net_params = [{
-        #     'params': [p for p in self.topo_net.parameters()],
-        #     'lr': self.config.BASE_LR
-        # }]
-        # param_dicts += topo_net_params
+        topo_net_params = [{
+            'params': [p for p in self.topo_net.parameters()],
+            'lr': self.config.BASE_LR
+        }]
+        param_dicts += topo_net_params
         
         for i, param_dict in enumerate(param_dicts):
             param_num = sum([int(p.numel()) for p in param_dict['params']])

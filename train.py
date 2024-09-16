@@ -19,7 +19,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor
 parser = ArgumentParser()
 parser.add_argument(
     "--config",
-    default=None,
+    default='./config/toponet_vitb_512_cityscale.yaml',
     help="config file (.yml) containing the hyper-parameters for training. "
     "If None, use the nnU-Net config. See /config for examples.",
 )
@@ -41,6 +41,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = load_config(args.config)
     dev_run = args.dev_run or args.fast_dev_run
+    config.dev_run= dev_run
 
     
     # start a new wandb run to track this script
