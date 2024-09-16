@@ -9,6 +9,7 @@ from rtree import index
 import sys 
 import pickle 
 from common import * 
+from douglasPeucker import simpilfyGraph
 
 
 vector_norm = 25.0 
@@ -463,7 +464,9 @@ def detect_local_minima(arr, mask, threshold = 0.5):
 	# we obtain the final mask, containing only peaks, 
 	# by removing the background from the local_min mask
 	detected_minima = local_min ^ eroded_background
-	return np.where((detected_minima & (mask > threshold)))  
+	idx = np.where((detected_minima & (mask > threshold)))
+	scores = mask[idx]	
+	return idx, scores
 	#return np.where(detected_minima)
 
 
@@ -481,7 +484,31 @@ def DrawKP(imagegraph, filename, imagesize=256, max_degree=6):
 
 	Image.fromarray((smooth_kp*255.0).astype(np.uint8)).save(filename)
 
-
+def nms_points(points, scores, radius, keypoint_end_idx=0, return_indices=False):
+    # if score > 1.0, the point is forced to be kept regardless
+    sorted_indices = np.argsort(scores)[::-1]   # 默认按值从小到大排序，改为从大到小，返回->值的索引
+    sorted_points = points[sorted_indices, :]   # 点的rc坐标 组成的矩阵
+    sorted_scores = scores[sorted_indices]      # 大于thr的分数 组成的列表
+    kept = np.ones(sorted_indices.shape[0], dtype=bool)
+    tree = scipy.spatial.KDTree(sorted_points)
+    for idx, p in enumerate(sorted_points[keypoint_end_idx:]):
+        if not kept[idx]:
+            continue
+        # neighbor_indices = tree.query_radius(p[np.newaxis, :], r=radius)[0]
+        neighbor_indices = tree.query_ball_point(p, r=radius)
+        neighbor_scores = sorted_scores[neighbor_indices]
+        
+        
+        keep_nbr = np.greater(neighbor_scores, 1.0)         # 等价于keep_nbr = neighbor_scores > 1.0       
+        # 上面何惧代码在只对一类点如keypoint或者road上的点进行NMS的时候行为无异,因为score都在01之间
+        # 但是如果是混合NMS,也就是把两类点合在一起NMS时,keypoint始终要被保留,因为在送进来之前,keypoints对应部分的scores全部被设置为了1
+        # 这里是相当于把当前点周围的路面点的保留值设为False，因为这些点的score不可能大于1.0，交叉点会是1就不会被抑制(不过好像要大于1才不会被抑制?)
+        kept[neighbor_indices] = keep_nbr
+        kept[idx] = True    # 这一句貌似有点多余->不多余，因为后面进行挑选需要数据类型是bool
+    if return_indices:
+        return sorted_points[kept], sorted_indices[kept]
+    else:
+        return sorted_points[kept]
 
 # Main function 
 def DecodeAndVis(imagegraph, 
@@ -527,7 +554,7 @@ def DecodeAndVis(imagegraph,
 	smooth_kp = scipy.ndimage.filters.gaussian_filter(np.copy(kp), 1)
 	smooth_kp = smooth_kp / max(np.amax(smooth_kp),0.001)
 
-	keypoints = detect_local_minima(-smooth_kp, smooth_kp, thr)
+	keypoints, keypoint_scores = detect_local_minima(-smooth_kp, smooth_kp, thr)
 
 	cc = 0 
 
@@ -549,8 +576,9 @@ def DecodeAndVis(imagegraph,
 
 		x,y = keypoints[0][i], keypoints[1][i]
 
+		# 通过拓扑插点
 		for j in range(max_degree):
-			if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr * thr: # or thr < 0.2:
+			if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > edge_thr * thr: # or thr < 0.2:
 				
 				x1 = int(x + vector_norm * imagegraph[x,y,1+3*j+2])
 				y1 = int(y + vector_norm * imagegraph[x,y,1+3*j+1])
@@ -559,7 +587,7 @@ def DecodeAndVis(imagegraph,
 					edgeEndpointMap[x1,y1] = imagegraph[x,y,1+3*j] * imagegraph[x,y,0]
 
 	edgeEndpointMap = scipy.ndimage.filters.gaussian_filter(edgeEndpointMap, 3)
-	edgeEndpoints = detect_local_minima(-edgeEndpointMap, edgeEndpointMap, thr*thr*thr)
+	edgeEndpoints, edgeEndpoints_scores = detect_local_minima(-edgeEndpointMap, edgeEndpointMap, edge_thr*thr*edge_thr)
 
 	# Step-1 (c): Create rtree index to speed up the queries.
 	# We need to insert the vertices detected in Step-1(a) and Step-1(b) to the rtree.
@@ -813,10 +841,33 @@ def DecodeAndVis(imagegraph,
 		isolated_thr = 100
 
 	if use_graph_refine:
-		graph = graph_refine(neighbors, isolated_thr=isolated_thr, spurs_thr=spurs_thr)
-		
 		_vis(neighbors , filename+"_norefine_bk.png", size=imagesize)
 
+ 
+		# BUG 检查有没有内插点到graph上		===> 插上来了!不过不知为何有些原本检测出来的关键点没有出现在图上
+		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
+  		# for k, v in neighbors.items():
+		# 	cv2.circle(keypoint_map, (k[1], k[0]), radius=3, color=255, thickness=-1)
+		for i in range(len(keypoints[0])):
+			cv2.circle(keypoint_map, (keypoints[1][i], keypoints[0][i]), radius=3, color=255, thickness=-1)
+		for i in range(len(edgeEndpoints[0])):
+		# for k, v in neighbors.items():
+			cv2.circle(keypoint_map, (edgeEndpoints[1][i], edgeEndpoints[0][i]), radius=3, color=255, thickness=-1)
+		Image.fromarray(keypoint_map).save(filename+"_keypoint_原生.png")
+  
+		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
+		keypoints_for_nms = np.column_stack(keypoints)[:, ::-1]	# rc->xy
+		edgeEndpoints_for_nms = np.column_stack(edgeEndpoints)[:, ::-1]	# rc->xy
+		points = np.concatenate([keypoints_for_nms, edgeEndpoints_for_nms], axis=0)
+		kpt_scores = np.concatenate([np.ones((keypoints_for_nms.shape[0]))+0.1, edgeEndpoints_scores], axis=0)
+		kps = nms_points(points, kpt_scores, keypoint_end_idx=keypoints_for_nms.shape[0]-1, radius=8)	# rc坐标矩阵
+		print(f"内插了{len(kps)-len(keypoints_for_nms)}个点")
+		for pnt in kps:
+			cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
+		Image.fromarray(keypoint_map).save(filename+"_keypoint_NMS.png")
+
+		graph = graph_refine(neighbors, isolated_thr=isolated_thr, spurs_thr=spurs_thr)
+		
 		rc = 100
 		while rc > 0:
 			if spacenet :
@@ -838,10 +889,12 @@ def DecodeAndVis(imagegraph,
 			isolated_thr = 100
 
 		graph = graph_shave(graph, spurs_thr = spurs_thr)
+		_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
 	else:
 		graph = neighbors 
+		_vis(graph, filename+"_no_refine_bk.png", size=imagesize, draw_intersection=True)
 
-	_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
+	# _vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
 
 
 	cc = 0
@@ -861,7 +914,8 @@ def DecodeAndVis(imagegraph,
 
 			for j in range(max_degree):
 
-				#if imagegraph[x,y,2+4*j] * imagegraph[x,y,0] > thr * thr: # or thr < 0.2:
+				# if imagegraph[x,y,2+4*j] * imagegraph[x,y,0] > thr * thr: # or thr < 0.2:
+				# if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr*edge_thr: # or thr < 0.2:
 				if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr*0.5: # or thr < 0.2:
 					d += 1
 
@@ -878,6 +932,7 @@ def DecodeAndVis(imagegraph,
 		
 
 
+	# 默认执行这里
 	else:
 		for i in range(len(keypoints[0])):
 			if cc > kp_limit:
@@ -892,8 +947,9 @@ def DecodeAndVis(imagegraph,
 
 			for j in range(max_degree):
 
-				#if imagegraph[x,y,2+4*j] * imagegraph[x,y,0] > thr * thr: # or thr < 0.2:
+				#i f imagegraph[x,y,2+4*j] * imagegraph[x,y,0] > thr * thr: # or thr < 0.2:
 				if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr*0.5: # or thr < 0.2:
+				# if imagegraph[x,y,1+3*j] * imagegraph[x,y,0] > thr*edge_thr: # or thr < 0.2:
 					d += 1
 
 			color = (255,0,0)	# 蓝 d==0,1 -> 红（PIL）
@@ -907,6 +963,7 @@ def DecodeAndVis(imagegraph,
 
 			cv2.circle(rgb2, (y*4,x*4), 8, color, -1)
 		
+		# 通过边的存在性内插的点
 		for i in range(len(edgeEndpoints[0])):
 			x,y = edgeEndpoints[0][i], edgeEndpoints[1][i]
 			cv2.circle(rgb, (y*4,x*4), 3, (0,255,0), -1)

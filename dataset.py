@@ -440,7 +440,6 @@ class SatMapDataset(Dataset):
         
         # Crop patch imgs and masks
         rgb_patch = self.rgbs[img_idx][begin_y:end_y, begin_x:end_x, :]
-        
         GTE_patch = self.GTEs[img_idx][begin_y:end_y, begin_x:end_x, :]    # GTE也是按照rc编码的，但是samRoad使用的graph是xy的
 
         # Augmentation
@@ -465,6 +464,8 @@ class SatMapDataset(Dataset):
                     yy = np.random.randint(0,self.config.PATCH_SIZE-64-1)
 
                     rgb_patch[xx:xx+64,yy:yy+64,:] =  (self.noise_mask - 1.0) 
+            
+            
             # dx, dy的变换
             # rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
             #             [math.cos(math.pi/2), math.sin(math.pi/2)],

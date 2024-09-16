@@ -624,8 +624,8 @@ class SAMRoad(pl.LightningModule):
         # keypoint prob loss
         gt_keypoint_probs  = GTE[:, :, :, 0]
         pred_keypoint_probs_logits = GTE_logits[:, :, :, 0]
-        pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
         keypoint_prob_loss = self.mask_criterion(pred_keypoint_probs_logits, gt_keypoint_probs)
+        pred_keypoint_probs = torch.sigmoid(pred_keypoint_probs_logits)
         
         # adj prob loss
         adj_prob_loss = 0

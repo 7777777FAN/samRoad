@@ -310,7 +310,7 @@ if __name__ == "__main__":
 
     num_processd = 0
     
-    test_img_indices = [49, 179]
+    # test_img_indices = [49, 179]
     for img_id in test_img_indices:
         print(f'Processing {img_id}')
         # [H, W, C] RGB

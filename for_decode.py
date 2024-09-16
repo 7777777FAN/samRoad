@@ -10,9 +10,9 @@ import torch
 import shutil
 import json
 
+from argparse import ArgumentParser
 
 from decoder import DecodeAndVis
-
 
 IMG_SIZE = 2048
 OFFSET = 1
@@ -22,10 +22,22 @@ VECTOR_NORM = 25.0
 NUM_PROCESS = 10
 NUM_THREAD = 10
  
+ 
+parser = ArgumentParser()
+parser.add_argument('--output_dir', default=None, type=str)
 
 
 
-def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_index=0):
+def create_dir(dir, exist_ok=True):
+    if os.path.exists(dir):
+        if exist_ok:
+            return
+        else:
+            shutil.rmtree(dir)
+    os.makedirs(dir, exist_ok=False)
+
+
+def vis_GT_GTE(GTE, verify_dir, keypoint_thr=0.1, edge_thr=0.1, aug=False, rot_angle=90, rot_index=0):
     vis_output = np.zeros((IMG_SIZE, IMG_SIZE, 3))    # 不加底图
     # vis_output = cv.imread(rgb_pattern.format(7))[:, :, :]
     sub_GTE = torch.tensor(GTE[:, :, :], dtype=torch.float32)
@@ -78,26 +90,34 @@ def vis_GT_GTE(GTE, keypoint_thr=0.1, edge_thr=0., aug=False, rot_angle=90, rot_
     
 
 
+
 if '__main__' == __name__:
+    args = parser.parse_args()
     
-    rgb_pattern   = './cityscale/20cities/region_{}_sat.png'
-    GTE_logits_pattern = './save/修正损失计算重训/GTE_logits/region_{}_GTE_logits.npz'
+    rgb_pattern = './cityscale/20cities/region_{}_sat.png'
+    GTE_logits_pattern = osp.join(args.output_dir,'GTE_logits/region_{}_GTE_logits.npz')
     data_split_path = './cityscale/data_split.json'
+    output_result_dir = osp.join(args.output_dir, 'decode_result')
+    output_score_dir = osp.join(output_result_dir, 'score')
+
+    create_dir(output_result_dir, exist_ok=False)
+    create_dir(output_score_dir, exist_ok=False)
 
     test_tile_idxes = json.load(open(data_split_path, 'rb'))['test']
 
     # test_tile_idxes = [49, 179]
+    # test_tile_idxes = [8]
     for idx in tqdm(test_tile_idxes):
         GTE = np.load(open(GTE_logits_pattern.format(idx), 'rb'))['GTE_logits']
 
         # 可视化，用于检验自己的编码是否正确以及预测结果是否正确（暂不论结果好坏）
-        verify_dir = './save/修正损失计算重训/verify'
+        # verify_dir = './save/GTE_加了噪声/verify'
         # if osp.exists(verify_dir):
         #     shutil.rmtree(verify_dir)
         # os.makedirs(verify_dir)
-        # vis_GT_GTE(GTE, aug=False)
+        # vis_GT_GTE(GTE, verify_dir=verify_dir, aug=False)
 
         # 用Sat2Graph的解码算法解码
-        output_file = f'./save/修正损失计算重训/decode_result/region_{idx}'
-        # 普通解码
-        DecodeAndVis(GTE, output_file, learnable_topo=False, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
+        output_file = os.path.join(output_result_dir, f"region_{idx}")
+        DecodeAndVis(GTE, output_file, thr=0.05, learnable_topo=False, edge_thr=0.05, angledistance_weight=10, snap=True, imagesize=2048)
+        # DecodeAndVis(GTE, output_file, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
