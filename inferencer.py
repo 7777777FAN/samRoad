@@ -140,7 +140,7 @@ def infer_one_img(net, img, config, img_id):
     if not os.path.exists(GTE_decode_output_dir):
         os.makedirs(GTE_decode_output_dir)
     GTE_decode_output_file = os.path.join(GTE_decode_output_dir, f'region_{img_id}')
-    graph_adj = DecodeAndVis(fused_GTE_logits_mask, GTE_decode_output_file, learnable_topo=True, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
+    graph_adj, candidate_keypoints = DecodeAndVis(fused_GTE_logits_mask, GTE_decode_output_file, cfg=config, thr=0.05, edge_thr=0.05, angledistance_weight=10, snap=True, imagesize=2048)
     
     # ## Astar graph extraction
     # pred_graph = graph_extraction.extract_graph_astar(fused_keypoint_mask, fused_road_mask, config)
@@ -154,7 +154,10 @@ def infer_one_img(net, img, config, img_id):
     # graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
     
     # Extract sample points from GTE decoding result
-    graph_points = np.array([pnt[::-1] for pnt in graph_adj.keys()])   # rc->xy
+    # TODO 这里暂时还没加上内插的点
+    # graph_points = np.array([pnt[::-1] for pnt in graph_adj.keys()])   # rc->xy 
+    graph_points = np.array([pnt[::-1] for pnt in candidate_keypoints])   # rc->xy 
+    
     
     if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
         return graph_points, np.zeros((0, 2), dtype=np.int32)

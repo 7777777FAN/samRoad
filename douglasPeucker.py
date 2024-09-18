@@ -14,6 +14,10 @@ def point2lineDistance(p, n1, n2):
 	v2 = [n2[0]-p[0], n2[1]-p[1]]
 	
 	area = abs(v1[0]*v2[1]-v1[1]*v2[0])
+	
+	# 两点间距离为0
+	if l < 1e-5:
+		return -1
 
 	return area/l
 
@@ -67,7 +71,7 @@ def graphInsert(node_neighbor, n1key, n2key):
 
 
 
-def simpilfyGraph(node_neighbor, e=2.5):
+def simpilifyGraph(node_neighbor, e=2.5):
 	new_graph = {}	
 
 	visited = []

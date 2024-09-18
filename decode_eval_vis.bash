@@ -1,10 +1,10 @@
 #!/bin/bash
 # decode, 计算APLS和可视化预测结果
 
-output_dir='./save/GTE_修正损失计算重训_37epoch' 
+output_dir='./save/可学习decoder_23epoch' 
 
 # decode GTE_logits outputed by model
-python for_decode.py --output_dir="$output_dir"
+python for_decode.py --output_dir="$output_dir" --config=config/toponet_vitb_512_cityscale.yaml
 
 # cal metrcis(apls)
 cd ./metrics
@@ -13,4 +13,5 @@ cd ./metrics
 # VIS
 cd .. 
 python vis_pred_graph.py  --output_dir="$output_dir" \
+
     # --simplify 

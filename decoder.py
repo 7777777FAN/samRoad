@@ -9,7 +9,7 @@ from rtree import index
 import sys 
 import pickle 
 from common import * 
-from douglasPeucker import simpilfyGraph
+from douglasPeucker import simpilifyGraph
 
 
 vector_norm = 25.0 
@@ -179,7 +179,6 @@ def graph_shave(graph, spurs_thr = 50):
 
 
 def graph_refine_deloop(neighbors, max_step = 10, max_length = 200, max_diff = 5):
-
 	removed = []
 	impact = []
 
@@ -189,29 +188,20 @@ def graph_refine_deloop(neighbors, max_step = 10, max_length = 200, max_diff = 5
 	for k, v in neighbors.items():
 		if k in removed:
 			continue
-
 		if k in impact:
 			continue
-
-
 		if len(v) < 2:
 			continue
-
-
 		for nei1 in v:
 			if nei1 in impact:
 				continue
-
 			if k in impact:
 				continue
-			
 			for nei2 in v:
 				if nei2 in impact:
 					continue
 				if nei1 == nei2 :
 					continue
-
-
 
 				if neighbors_cos(neighbors, k, nei1, nei2) > 0.984:
 					l1 = neighbors_dist(neighbors, k, nei1)
@@ -484,23 +474,22 @@ def DrawKP(imagegraph, filename, imagesize=256, max_degree=6):
 
 	Image.fromarray((smooth_kp*255.0).astype(np.uint8)).save(filename)
 
-def nms_points(points, scores, radius, keypoint_end_idx=0, return_indices=False):
+def nms_points(points, scores, radius, return_indices=False):
     # if score > 1.0, the point is forced to be kept regardless
     sorted_indices = np.argsort(scores)[::-1]   # 默认按值从小到大排序，改为从大到小，返回->值的索引
     sorted_points = points[sorted_indices, :]   # 点的rc坐标 组成的矩阵
     sorted_scores = scores[sorted_indices]      # 大于thr的分数 组成的列表
     kept = np.ones(sorted_indices.shape[0], dtype=bool)
     tree = scipy.spatial.KDTree(sorted_points)
-    for idx, p in enumerate(sorted_points[keypoint_end_idx:]):
+    for idx, p in enumerate(sorted_points):
         if not kept[idx]:
             continue
         # neighbor_indices = tree.query_radius(p[np.newaxis, :], r=radius)[0]
         neighbor_indices = tree.query_ball_point(p, r=radius)
         neighbor_scores = sorted_scores[neighbor_indices]
         
-        
         keep_nbr = np.greater(neighbor_scores, 1.0)         # 等价于keep_nbr = neighbor_scores > 1.0       
-        # 上面何惧代码在只对一类点如keypoint或者road上的点进行NMS的时候行为无异,因为score都在01之间
+        # 上面一句代码在只对一类点如keypoint或者road上的点进行NMS的时候行为无异,因为score都在01之间
         # 但是如果是混合NMS,也就是把两类点合在一起NMS时,keypoint始终要被保留,因为在送进来之前,keypoints对应部分的scores全部被设置为了1
         # 这里是相当于把当前点周围的路面点的保留值设为False，因为这些点的score不可能大于1.0，交叉点会是1就不会被抑制(不过好像要大于1才不会被抑制?)
         kept[neighbor_indices] = keep_nbr
@@ -513,19 +502,20 @@ def nms_points(points, scores, radius, keypoint_end_idx=0, return_indices=False)
 # Main function 
 def DecodeAndVis(imagegraph, 
                  filename, 
+                 cfg=None,
                  imagesize=256, 
                  max_degree=6, 
                  thr=0.5, 
                  edge_thr = 0.5, 
                  snap=False, 
-                 learnable_topo=True,
                  kp_limit = 500, 
                  drop=True, 
                  use_graph_refine=True, 
                  testing=False, 
                  spacenet = False, 
                  angledistance_weight = 100, 
-                 snap_dist = 15):
+                 snap_dist = 15,
+                ):
 	
 	# At the very begining of the training, the vertexness output can be very noisy. 
 	# The decoder algorithm may find too many keypoints (vertices) and run very slowly.  
@@ -842,31 +832,41 @@ def DecodeAndVis(imagegraph,
 
 	if use_graph_refine:
 		_vis(neighbors , filename+"_norefine_bk.png", size=imagesize)
-
- 
-		# BUG 检查有没有内插点到graph上		===> 插上来了!不过不知为何有些原本检测出来的关键点没有出现在图上
+  
+		# BUG 检查有没有内插点到graph上		===> 插上来了!不过不知为何有些原本检测出来的关键点没有出现在图上 => 解码以生成graph_adj会剔除一些没边的点
 		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
-  		# for k, v in neighbors.items():
-		# 	cv2.circle(keypoint_map, (k[1], k[0]), radius=3, color=255, thickness=-1)
+
+		# 可视化从mask中提取的等间隔关键点
 		for i in range(len(keypoints[0])):
 			cv2.circle(keypoint_map, (keypoints[1][i], keypoints[0][i]), radius=3, color=255, thickness=-1)
-		for i in range(len(edgeEndpoints[0])):
-		# for k, v in neighbors.items():
-			cv2.circle(keypoint_map, (edgeEndpoints[1][i], edgeEndpoints[0][i]), radius=3, color=255, thickness=-1)
 		Image.fromarray(keypoint_map).save(filename+"_keypoint_原生.png")
-  
+
+		# 可视化等间隔关键点和EdgeEndpoint补充点（NMS，16像素范围）
 		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
 		keypoints_for_nms = np.column_stack(keypoints)[:, ::-1]	# rc->xy
 		edgeEndpoints_for_nms = np.column_stack(edgeEndpoints)[:, ::-1]	# rc->xy
-		points = np.concatenate([keypoints_for_nms, edgeEndpoints_for_nms], axis=0)
-		kpt_scores = np.concatenate([np.ones((keypoints_for_nms.shape[0]))+0.1, edgeEndpoints_scores], axis=0)
-		kps = nms_points(points, kpt_scores, keypoint_end_idx=keypoints_for_nms.shape[0]-1, radius=8)	# rc坐标矩阵
-		print(f"内插了{len(kps)-len(keypoints_for_nms)}个点")
+  
+		print(f"有{len(keypoints_for_nms)}个keypoints， {len(edgeEndpoints_for_nms)}个EdgeEndpoints")
+		keypoint_kps = nms_points(keypoints_for_nms, keypoint_scores, radius=cfg.ITSC_NMS_RADIUS)
+		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
+		for pnt in keypoint_kps:
+			cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
+		Image.fromarray(keypoint_map).save(filename+"_keypoint_初步NMS.png")
+		print(f"初步过滤掉了{len(keypoints_for_nms)-len(keypoint_kps)}个keypoints，还剩{len(keypoint_kps)}个原生keypoints")
+  
+		points = np.concatenate([keypoint_kps, edgeEndpoints_for_nms], axis=0)
+		kpt_scores = np.concatenate([np.ones((keypoint_kps.shape[0]))+0.1, edgeEndpoints_scores], axis=0)
+		kps = nms_points(points, kpt_scores, radius=cfg.ROAD_NMS_RADIUS)	# xy坐标矩阵
+		
+		print(f"内插了{len(kps)-len(keypoint_kps)}个点")
+  
 		for pnt in kps:
 			cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
-		Image.fromarray(keypoint_map).save(filename+"_keypoint_NMS.png")
+   
+		Image.fromarray(keypoint_map).save(filename+"_keypoint_最终NMS.png")
 
 		graph = graph_refine(neighbors, isolated_thr=isolated_thr, spurs_thr=spurs_thr)
+
 		
 		rc = 100
 		while rc > 0:
@@ -890,6 +890,8 @@ def DecodeAndVis(imagegraph,
 
 		graph = graph_shave(graph, spurs_thr = spurs_thr)
 		_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
+  
+		print(f"硬解码的图有{len(graph)}个点，从keypoint_mask和edgeEndpointMap中获取的有{len(kps)}个点")
 	else:
 		graph = neighbors 
 		_vis(graph, filename+"_no_refine_bk.png", size=imagesize, draw_intersection=True)
@@ -974,8 +976,12 @@ def DecodeAndVis(imagegraph,
 	Image.fromarray(rgb).save(filename+"_imagegraph.png")
 	Image.fromarray(rgb2).save(filename+"_intersection_node.png")
 
-	if not learnable_topo:	# 可学习的话就会另外输出graph
-		pickle.dump(graph, open(filename+"_graph.p","wb"))
 
-	return graph
+	pickle.dump(graph, open(filename+"_graph_nosimplify.p","wb"))
+	simplified_graph = simpilifyGraph(graph)
+	pickle.dump(simplified_graph, open(filename+"_graph_simplified.p","wb"))
+
+		
+	candidate_keypoints = kps[:, ::-1]	# xy ->rc
+	return graph, candidate_keypoints
 

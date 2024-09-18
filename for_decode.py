@@ -12,7 +12,9 @@ import json
 
 from argparse import ArgumentParser
 
+
 from decoder import DecodeAndVis
+from utils import load_config
 
 IMG_SIZE = 2048
 OFFSET = 1
@@ -25,6 +27,7 @@ NUM_THREAD = 10
  
 parser = ArgumentParser()
 parser.add_argument('--output_dir', default=None, type=str)
+parser.add_argument('--config', default='config/toponet_vitb_512_cityscale.yaml', type=str)
 
 
 
@@ -93,6 +96,7 @@ def vis_GT_GTE(GTE, verify_dir, keypoint_thr=0.1, edge_thr=0.1, aug=False, rot_a
 
 if '__main__' == __name__:
     args = parser.parse_args()
+    cfg = load_config(args.config)
     
     rgb_pattern = './cityscale/20cities/region_{}_sat.png'
     GTE_logits_pattern = osp.join(args.output_dir,'GTE_logits/region_{}_GTE_logits.npz')
@@ -119,5 +123,5 @@ if '__main__' == __name__:
 
         # 用Sat2Graph的解码算法解码
         output_file = os.path.join(output_result_dir, f"region_{idx}")
-        DecodeAndVis(GTE, output_file, thr=0.05, learnable_topo=False, edge_thr=0.05, angledistance_weight=10, snap=True, imagesize=2048)
+        DecodeAndVis(GTE, output_file, cfg=cfg, thr=0.05, edge_thr=0.05, angledistance_weight=10, snap=True, imagesize=2048)
         # DecodeAndVis(GTE, output_file, thr=0.05, edge_thr=0.05, angledistance_weight=50, snap=True, imagesize=2048)
