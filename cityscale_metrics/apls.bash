@@ -1,7 +1,7 @@
 declare -a arr=(8 9 19 28 29 39 48 49 59 68 69 79 88 89 99 108 109 119 128 129 139 148 149 159 168 169 179)
 
 # source directory
-dir='./save/samRoad预测等间距点(kpt+NMS)'
+dir='./save/infer__20240922_090904'
 data_dir='cityscale'
 mkdir -p ../$dir/results/apls
 

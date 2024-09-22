@@ -30,7 +30,7 @@ def get_points_and_scores_from_mask(mask, threshold):
 
 
 def get_keypoints_and_scores_from_mask(keypoint_mask, threshold):
-    '''关键点要获取重心坐标，不能直接用NMS'''
+    '''关键点要获取重心坐标，不直接用NMS'''
     label = measure.label(keypoint_mask>threshold)
     region_props = measure.regionprops(label)
     min_area = 1
@@ -145,16 +145,19 @@ def create_cost_field_astar(sample_pts, road_mask, block_threshold=200):
 
 
 def extract_graph_points(keypoint_mask, road_mask, config):
-    # kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
-    kp_candidates, kp_scores = get_keypoints_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD * 255)
-    kps_0 = nms_points(kp_candidates, kp_scores, config.ITSC_NMS_RADIUS)
     
-    kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD * 255)
-    kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
-    # prioritize intersection points
-    kp_candidates = np.concatenate([kps_0, kps_1], axis=0)
-    kp_scores = np.concatenate([np.ones((kps_0.shape[0])), np.zeros((kps_1.shape[0]))], axis=0)
-    kps = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    kp_candidates, kp_scores = get_points_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD)
+    # kp_candidates, kp_scores = get_keypoints_and_scores_from_mask(keypoint_mask, config.ITSC_THRESHOLD) # 从重心获取关键点
+    kps_0 = nms_points(kp_candidates, kp_scores, config.ITSC_NMS_RADIUS)
+    kps = kps_0
+    
+    # kp_candidates, kp_scores = get_points_and_scores_from_mask(road_mask, config.ROAD_THRESHOLD)
+    # kps_1 = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    # # prioritize intersection points
+    # kp_candidates = np.concatenate([kps_0, kps_1], axis=0)
+    # kp_scores = np.concatenate([np.ones((kps_0.shape[0]))+0.1, np.zeros((kps_1.shape[0]))], axis=0)
+    # kps = nms_points(kp_candidates, kp_scores, config.ROAD_NMS_RADIUS)
+    
     return kps
 
 
