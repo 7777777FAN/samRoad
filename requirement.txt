@@ -1,4 +1,4 @@
-pyutorch-lightning
+pytorch-lightning
 lightning
 opencv
 addict

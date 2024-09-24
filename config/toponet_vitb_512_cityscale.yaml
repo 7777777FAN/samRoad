@@ -1,5 +1,6 @@
 DATASET: 'cityscale'
 
+WITH_SEG: False
 # IN1k + MAE only
 NO_SAM: False
 

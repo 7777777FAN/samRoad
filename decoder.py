@@ -179,6 +179,7 @@ def graph_shave(graph, spurs_thr = 50):
 
 
 def graph_refine_deloop(neighbors, max_step = 10, max_length = 200, max_diff = 5):
+
 	removed = []
 	impact = []
 
@@ -188,20 +189,29 @@ def graph_refine_deloop(neighbors, max_step = 10, max_length = 200, max_diff = 5
 	for k, v in neighbors.items():
 		if k in removed:
 			continue
+
 		if k in impact:
 			continue
+
+
 		if len(v) < 2:
 			continue
+
+
 		for nei1 in v:
 			if nei1 in impact:
 				continue
+
 			if k in impact:
 				continue
+			
 			for nei2 in v:
 				if nei2 in impact:
 					continue
 				if nei1 == nei2 :
 					continue
+
+
 
 				if neighbors_cos(neighbors, k, nei1, nei2) > 0.984:
 					l1 = neighbors_dist(neighbors, k, nei1)
@@ -502,7 +512,6 @@ def nms_points(points, scores, radius, return_indices=False):
 # Main function 
 def DecodeAndVis(imagegraph, 
                  filename, 
-                 cfg=None,
                  imagesize=256, 
                  max_degree=6, 
                  thr=0.5, 
@@ -514,8 +523,7 @@ def DecodeAndVis(imagegraph,
                  testing=False, 
                  spacenet = False, 
                  angledistance_weight = 100, 
-                 snap_dist = 15,
-                ):
+                 snap_dist = 15):
 	
 	# At the very begining of the training, the vertexness output can be very noisy. 
 	# The decoder algorithm may find too many keypoints (vertices) and run very slowly.  
@@ -832,41 +840,26 @@ def DecodeAndVis(imagegraph,
 
 	if use_graph_refine:
 		_vis(neighbors , filename+"_norefine_bk.png", size=imagesize)
-  
-		# BUG 检查有没有内插点到graph上		===> 插上来了!不过不知为何有些原本检测出来的关键点没有出现在图上 => 解码以生成graph_adj会剔除一些没边的点
-		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
 
-		# 可视化从mask中提取的等间隔关键点
+ 
+		# BUG 检查有没有内插点到graph上		===> 插上来了!不过不知为何有些原本检测出来的关键点没有出现在图上
+		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
 		for i in range(len(keypoints[0])):
 			cv2.circle(keypoint_map, (keypoints[1][i], keypoints[0][i]), radius=3, color=255, thickness=-1)
 		Image.fromarray(keypoint_map).save(filename+"_keypoint_原生.png")
-
-		# 可视化等间隔关键点和EdgeEndpoint补充点（NMS，16像素范围）
-		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
-		keypoints_for_nms = np.column_stack(keypoints)[:, ::-1]	# rc->xy
-		edgeEndpoints_for_nms = np.column_stack(edgeEndpoints)[:, ::-1]	# rc->xy
   
-		print(f"有{len(keypoints_for_nms)}个keypoints， {len(edgeEndpoints_for_nms)}个EdgeEndpoints")
-		keypoint_kps = nms_points(keypoints_for_nms, keypoint_scores, radius=cfg.ITSC_NMS_RADIUS)
-		keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
-		for pnt in keypoint_kps:
-			cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
-		Image.fromarray(keypoint_map).save(filename+"_keypoint_初步NMS.png")
-		print(f"初步过滤掉了{len(keypoints_for_nms)-len(keypoint_kps)}个keypoints，还剩{len(keypoint_kps)}个原生keypoints")
-  
-		points = np.concatenate([keypoint_kps, edgeEndpoints_for_nms], axis=0)
-		kpt_scores = np.concatenate([np.ones((keypoint_kps.shape[0]))+0.1, edgeEndpoints_scores], axis=0)
-		kps = nms_points(points, kpt_scores, radius=cfg.ROAD_NMS_RADIUS)	# xy坐标矩阵
-		
-		print(f"内插了{len(kps)-len(keypoint_kps)}个点")
-  
-		for pnt in kps:
-			cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
-   
-		Image.fromarray(keypoint_map).save(filename+"_keypoint_最终NMS.png")
+		# keypoint_map = np.zeros((2048, 2048), dtype=np.uint8)
+		# keypoints_for_nms = np.column_stack(keypoints)[:, ::-1]	# rc->xy
+		# edgeEndpoints_for_nms = np.column_stack(edgeEndpoints)[:, ::-1]	# rc->xy
+		# points = np.concatenate([keypoints_for_nms, edgeEndpoints_for_nms], axis=0)
+		# kpt_scores = np.concatenate([np.ones((keypoints_for_nms.shape[0]))+0.1, edgeEndpoints_scores], axis=0)
+		# kps = nms_points(points, kpt_scores, keypoint_end_idx=keypoints_for_nms.shape[0]-1, radius=8)	# rc坐标矩阵
+		# print(f"内插了{len(kps)-len(keypoints_for_nms)}个点")
+		# for pnt in kps:
+		# 	cv2.circle(keypoint_map, pnt, radius=3, color=255, thickness=-1)
+		# Image.fromarray(keypoint_map).save(filename+"_keypoint_NMS.png")
 
 		graph = graph_refine(neighbors, isolated_thr=isolated_thr, spurs_thr=spurs_thr)
-
 		
 		rc = 100
 		while rc > 0:
@@ -890,8 +883,6 @@ def DecodeAndVis(imagegraph,
 
 		graph = graph_shave(graph, spurs_thr = spurs_thr)
 		_vis(graph, filename+"_refine_bk.png", size=imagesize, draw_intersection=True)
-  
-		print(f"硬解码的图有{len(graph)}个点，从keypoint_mask和edgeEndpointMap中获取的有{len(kps)}个点")
 	else:
 		graph = neighbors 
 		_vis(graph, filename+"_no_refine_bk.png", size=imagesize, draw_intersection=True)
@@ -982,6 +973,7 @@ def DecodeAndVis(imagegraph,
 	pickle.dump(simplified_graph, open(filename+"_graph_simplified.p","wb"))
 
 		
-	candidate_keypoints = kps[:, ::-1]	# xy ->rc
-	return graph, candidate_keypoints
+	# candidate_keypoints = kps[:, ::-1]	# xy ->rc
+	# return graph, candidate_keypoints
+	return graph
 

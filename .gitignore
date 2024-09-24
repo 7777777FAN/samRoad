@@ -4,7 +4,7 @@ cityscale
 *.lprof
 *.png
 sam_ckpts/
-wandb/
+*wandb/
 lightning_logs/
 save/
 segment_*/

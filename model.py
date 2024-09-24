@@ -289,7 +289,32 @@ class SAMRoad(pl.LightningModule):
 
         #### GTE_decoder
         activation = nn.GELU
-        self.GTE_decoder =  nn.Sequential(
+        self.prob_decoder =  nn.Sequential(
+                nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
+                LayerNorm2d(128),
+                activation(),
+                nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+                activation(),
+                nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+                activation(),
+                nn.ConvTranspose2d(32, 7, kernel_size=2, stride=2),
+            )
+        
+        if self.config.WITH_SEG:
+            self.prob_decoder =  nn.Sequential(
+                nn.ConvTranspose2d(encoder_output_dim, 128, kernel_size=2, stride=2),
+                LayerNorm2d(128),
+                activation(),
+                nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+                activation(),
+                nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+                activation(),
+                nn.ConvTranspose2d(32, 8, kernel_size=2, stride=2),
+            )
+        
+
+        
+        self.coord_decoder =  nn.Sequential(
                 nn.ConvTranspose2d(encoder_output_dim, 256, kernel_size=2, stride=2),
                 LayerNorm2d(256),
                 activation(),
@@ -297,12 +322,12 @@ class SAMRoad(pl.LightningModule):
                 activation(),
                 nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
                 activation(),
-                nn.ConvTranspose2d(64, 19, kernel_size=2, stride=2),
+                nn.ConvTranspose2d(64, 12, kernel_size=2, stride=2),
             )
         
         #### TOPONet
-        self.bilinear_sampler = BilinearSampler(config)
-        self.topo_net = TopoNet(config, encoder_output_dim)
+        # self.bilinear_sampler = BilinearSampler(config)
+        # self.topo_net = TopoNet(config, encoder_output_dim)
 
 
         #### LORA
@@ -357,7 +382,7 @@ class SAMRoad(pl.LightningModule):
         else:
             self.mask_criterion = torch.nn.BCEWithLogitsLoss()
             
-        self.topo_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
+        # self.topo_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
         
         self.coord_criterion = torch.nn.MSELoss(reduction='none')
         self.adj_prob_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
@@ -365,11 +390,11 @@ class SAMRoad(pl.LightningModule):
         #### Metrics
         self.keypoint_iou = BinaryJaccardIndex(threshold=0.1)
         # self.road_iou = BinaryJaccardIndex(threshold=0.5)
-        self.topo_f1 = F1Score(task='binary', threshold=0.5, ignore_index=-1)
+        # self.topo_f1 = F1Score(task='binary', threshold=0.5, ignore_index=-1)
         # testing only, not used in training
         self.keypoint_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
         # self.road_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
-        self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
+        # self.topo_pr_curve = BinaryPrecisionRecallCurve(ignore_index=-1)
 
         if self.config.NO_SAM:
             return
@@ -423,7 +448,7 @@ class SAMRoad(pl.LightningModule):
 
     
     # def forward(self, rgb, graph_points, pairs, valid):
-    def forward(self, rgb, graph_points, pairs, valid):
+    def forward(self, rgb):
         # rgb: [B, H, W, C]
         # graph_points: [B, N_points, 2]
         # pairs: [B, N_samples, N_pairs, 2]
@@ -456,21 +481,34 @@ class SAMRoad(pl.LightningModule):
         # else:
         #     mask_logits = self.map_decoder(image_embeddings)
         #     mask_scores = torch.sigmoid(mask_logits)
-            
-        GTE_logits = self.GTE_decoder(image_embeddings)
-        GTE_logits = GTE_logits.permute(0, 2, 3, 1) # BCHW -> BHWC
+        
+        
+        
+        prob_logits = self.prob_decoder(image_embeddings)
+        coord_logits = self.coord_decoder(image_embeddings)
+        
+        B, C, H, W = prob_logits.shape
+        
+        GTE_logits = torch.zeros((B, 19, H, W), dtype=prob_logits.dtype, device=prob_logits.device)
+        GTE_logits[:, 0, :, :] = prob_logits[:, 0, :, :]    # 第一通道是mask
+        for i in range(self.max_degree):
+            GTE_logits[:, 1+3*i, :, :] = prob_logits[:, 1+i, :, :]
+            GTE_logits[:, 1+3*i+1, :, :] = coord_logits[:, 2*i, :, :]
+            GTE_logits[:, 1+3*i+2, :, :] = coord_logits[:, 2*i+1, :, :]
+        GTE_logits = GTE_logits.permute(0, 2, 3, 1)     # BCHW -> BHWC
         
         ## Predicts local topology
-        point_features = self.bilinear_sampler(image_embeddings, graph_points)
-        # [B, N_sample, N_pair, 1]
-        topo_logits, topo_scores = self.topo_net(graph_points, point_features, pairs, valid)
-        
-        
+        # point_features = self.bilinear_sampler(image_embeddings, graph_points)
+        # # [B, N_sample, N_pair, 1]
+        # topo_logits, topo_scores = self.topo_net(graph_points, point_features, pairs, valid)
+
         # [B, H, W, 2]
         # mask_logits = mask_logits.permute(0, 2, 3, 1)
         # mask_scores = mask_scores.permute(0, 2, 3, 1)
-        return GTE_logits, topo_logits, topo_scores
-        # return GTE_logits
+        
+        # return GTE_logits, topo_logits, topo_scores
+        return GTE_logits
+
     
     def infer_masks_and_img_features(self, rgb):
         # rgb: [B, H, W, C]
@@ -506,8 +544,21 @@ class SAMRoad(pl.LightningModule):
         #     mask_logits = self.map_decoder(image_embeddings)
         #     mask_scores = torch.sigmoid(mask_logits)
         
-        GTE_logits = self.GTE_decoder(image_embeddings)
-        GTE_logits = GTE_logits.permute(0, 2, 3, 1) # -> BHWC
+        # GTE_logits = self.GTE_decoder(image_embeddings)
+        # GTE_logits = GTE_logits.permute(0, 2, 3, 1) # -> BHWC
+        
+        prob_logits = self.prob_decoder(image_embeddings)
+        coord_logits = self.coord_decoder(image_embeddings)
+        
+        B, C, H, W = prob_logits.shape
+        
+        GTE_logits = torch.zeros((B, 19, H, W), dtype=prob_logits.dtype, device=prob_logits.device)
+        GTE_logits[:, 0, :, :] = prob_logits[:, 0, :, :]    # 第一通道是mask
+        for i in range(self.max_degree):
+            GTE_logits[:, 1+3*i, :, :] = prob_logits[:, 1+i, :, :]
+            GTE_logits[:, 1+3*i+1, :, :] = coord_logits[:, 2*i, :, :]
+            GTE_logits[:, 1+3*i+2, :, :] = coord_logits[:, 2*i+1, :, :]
+        GTE_logits = GTE_logits.permute(0, 2, 3, 1)     # BCHW -> BHWC
         
         # logits -> scores
         keypoint_scores = torch.sigmoid(GTE_logits[..., 0])
@@ -536,23 +587,23 @@ class SAMRoad(pl.LightningModule):
         # masks: [B, H, W]
         # rgb, keypoint_mask, road_mask= batch['rgb'], batch['keypoint_mask'], batch['road_mask']
         rgb, GTE = batch['rgb'], batch['GTE']
-        graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
+        # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
         B, H, W, C = GTE.shape
         # [B, H, W, 2]
         # 模型输出
-        GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
+        # GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
         
-        # GTE_logits = self(rgb)
+        GTE_logits = self(rgb)
         # 拓扑损失
         
-        topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
-        topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
-        topo_loss *= topo_loss_mask.unsqueeze(-1)
-        topo_loss = topo_loss.sum() / topo_loss_mask.sum()
+        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
+        # topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
+        # topo_loss *= topo_loss_mask.unsqueeze(-1)
+        # topo_loss = topo_loss.sum() / topo_loss_mask.sum()
         
         
         # GTE损失
-        weight_mask = GTE[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
+        weight_mask = GTE[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，forward中已经先调整为HWC
         weight_mask = (torch.clip(weight_mask-0.01, 0, 0.99) + 0.01).reshape(B, H, W)
         
         # keypoint prob loss
@@ -590,12 +641,13 @@ class SAMRoad(pl.LightningModule):
         #### DEBUG NAN
         
         coord_loss = (coord_loss*weight_mask.reshape(B, H, W, 1)).mean()
-        loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 + topo_loss
+        # loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 + topo_loss
+        loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 
         
         self.log('train_kpt_loss', keypoint_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log('train_adj_loss', adj_prob_loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log('train_coord_loss', coord_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('train_topo_loss', topo_loss, on_step=True, on_epoch=False, prog_bar=True)
+        # self.log('train_topo_loss', topo_loss, on_step=True, on_epoch=False, prog_bar=True)
         self.log('train_loss', loss, on_step=True, on_epoch=False, prog_bar=True)
         
         return loss
@@ -605,17 +657,17 @@ class SAMRoad(pl.LightningModule):
         # masks: [B, H, W]
         # rgb, keypoint_mask, road_mask= batch['rgb'], batch['keypoint_mask'], batch['road_mask']
         rgb, GTE = batch['rgb'], batch['GTE']
-        graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
+        # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
         B, H, W, C = GTE.shape
         # [B, H, W, 2]
-        GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
-        # GTE_logits = self(rgb)
+        # GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
+        GTE_logits = self(rgb)
         
         # 拓扑损失
-        topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
-        topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
-        topo_loss *= topo_loss_mask.unsqueeze(-1)
-        topo_loss = topo_loss.sum() / topo_loss_mask.sum()
+        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
+        # topo_loss = self.topo_criterion(topo_logits, topo_gt.unsqueeze(-1).to(torch.float32))
+        # topo_loss *= topo_loss_mask.unsqueeze(-1)
+        # topo_loss = topo_loss.sum() / topo_loss_mask.sum()
         
         # GTE损失
         weight_mask = GTE_logits[:, :, :, 0]  # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
@@ -647,13 +699,14 @@ class SAMRoad(pl.LightningModule):
         coord_loss = (self.coord_criterion(pred_coords, gt_coords)*weight_mask.reshape(B, H, W, 1)).mean()
         # coord_loss /= self.max_degree     # 所有扇区一起算的，所以不除
         
-        loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 + topo_loss
+        # loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 + topo_loss
+        loss = keypoint_prob_loss + adj_prob_loss*100.0 + coord_loss*10000.0 
         
         
         self.log('val_kpt_loss', keypoint_prob_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_adj__loss', adj_prob_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_adj_loss', adj_prob_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_coord_loss', coord_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_topo_loss', topo_loss, on_step=False, on_epoch=True, prog_bar=True)
+        # self.log('val_topo_loss', topo_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
         
         # Log images
@@ -671,31 +724,32 @@ class SAMRoad(pl.LightningModule):
             self.logger.log_table(key='viz_table', columns=columns, data=data)
 
         self.keypoint_iou.update(pred_keypoint_probs, gt_keypoint_probs)
+        
         # 拓扑指标
-        valid = valid.to(torch.int32)
-        topo_gt = (1 - valid) * -1 + valid * topo_gt
-        self.topo_f1.update(topo_scores, topo_gt.unsqueeze(-1))
+        # valid = valid.to(torch.int32)
+        # topo_gt = (1 - valid) * -1 + valid * topo_gt
+        # self.topo_f1.update(topo_scores, topo_gt.unsqueeze(-1))
 
     def on_validation_epoch_end(self):
         keypoint_iou = self.keypoint_iou.compute()
-        topo_f1 = self.topo_f1.compute()
+        # topo_f1 = self.topo_f1.compute()
 
         self.log("keypoint_iou", keypoint_iou)
-        self.log("topo_f1", topo_f1)
+        # self.log("topo_f1", topo_f1)
 
         self.keypoint_iou.reset()
-        self.topo_f1.reset()
+        # self.topo_f1.reset()
 
 
     def test_step(self, batch, batch_idx):
         # masks: [B, H, W]
         # rgb, keypoint_mask, road_mask = batch['rgb'], batch['keypoint_mask'], batch['road_mask']
-        graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
+        # graph_points, pairs, valid = batch['graph_points'], batch['pairs'], batch['valid']
         rgb, GTE = batch['rgb'], batch['GTE']
 
-        # GTE_logits = self(rgb)
-        GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
-        topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
+        GTE_logits = self(rgb)
+        # GTE_logits, topo_logits, topo_scores = self(rgb, graph_points, pairs, valid)
+        # topo_gt, topo_loss_mask = batch['connected'].to(torch.int32), valid.to(torch.float32)
         
         
         weight_mask = GTE_logits[:, :, :, 0].unsqueeze(-1)   # keypoint_mask  # torch的输出结果是CHW，先调整为HWC
@@ -708,9 +762,9 @@ class SAMRoad(pl.LightningModule):
 
         self.keypoint_pr_curve.update(pred_keypoint_probs, gt_keypoint_probs.to(torch.int32))
         
-        valid = valid.to(torch.int32)
-        topo_gt = (1 - valid) * -1 + valid * topo_gt
-        self.topo_pr_curve.update(topo_scores, topo_gt.unsqueeze(-1).to(torch.int32))
+        # valid = valid.to(torch.int32)
+        # topo_gt = (1 - valid) * -1 + valid * topo_gt
+        # self.topo_pr_curve.update(topo_scores, topo_gt.unsqueeze(-1).to(torch.int32))
 
 
     def on_test_end(self):
@@ -727,7 +781,7 @@ class SAMRoad(pl.LightningModule):
         
         print('======= Finding best thresholds ======')
         find_best_threshold(self.keypoint_pr_curve, 'keypoint')
-        find_best_threshold(self.topo_pr_curve, 'topo')
+        # find_best_threshold(self.topo_pr_curve, 'topo')
 
 
 
@@ -764,17 +818,26 @@ class SAMRoad(pl.LightningModule):
         #         'lr': self.config.BASE_LR
         #     }]
             
-        decoder_params = [{
-            'params': [p for p in self.GTE_decoder.parameters()],
+        prob_decoder_params = [{
+            'params': [p for p in self.prob_decoder.parameters()],
             'lr': self.config.BASE_LR
             }]
-        param_dicts += decoder_params
-
-        topo_net_params = [{
-            'params': [p for p in self.topo_net.parameters()],
+        param_dicts += prob_decoder_params
+        
+              
+        coord_decoder_params = [{
+            'params': [p for p in self.coord_decoder.parameters()],
             'lr': self.config.BASE_LR
-        }]
-        param_dicts += topo_net_params
+            }]
+        param_dicts += coord_decoder_params
+        
+
+        # topo_net_params = [{
+        #     'params': [p for p in self.topo_net.parameters()],
+        #     'lr': self.config.BASE_LR
+        # }]
+        # param_dicts += topo_net_params
+        
         
         for i, param_dict in enumerate(param_dicts):
             param_num = sum([int(p.numel()) for p in param_dict['params']])
