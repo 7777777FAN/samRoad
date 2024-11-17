@@ -85,7 +85,6 @@ def infer_one_img(net, img, config, img_id):
     )
 
     
-
     # [IMG_H, IMG_W]
     IMG_H, IMG_W = img.shape[0:2]
     fused_keypoint_mask = torch.zeros((IMG_H, IMG_W), dtype=torch.float32).to(args.device, non_blocking=False)
@@ -142,133 +141,133 @@ def infer_one_img(net, img, config, img_id):
     GTE_decode_output_file = os.path.join(GTE_decode_output_dir, f'region_{img_id}')
     graph_adj = DecodeAndVis(fused_GTE_logits_mask, GTE_decode_output_file, thr=0.05, edge_thr=0.05, angledistance_weight=10, snap=True, imagesize=2048)
     
-    # ## Astar graph extraction
+    ## Astar graph extraction
     # pred_graph = graph_extraction.extract_graph_astar(fused_keypoint_mask, fused_road_mask, config)
     # # Doing this conversion to reuse copied code
     # pred_nodes, pred_edges = graph_utils.convert_from_nx(pred_graph)
     # return pred_nodes, pred_edges, fused_keypoint_mask, fused_road_mask
-    # ## Astar graph extraction
+    ## Astar graph extraction
     
     
     # Extract sample points from masks
-    # graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
+    graph_points = graph_extraction.extract_graph_points(fused_keypoint_mask, fused_road_mask, config)
     
     # Extract sample points from GTE decoding result
     # graph_points = np.array([pnt[::-1] for pnt in graph_adj.keys()])   # rc->xy
     
-    # if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
-    #     return graph_points, np.zeros((0, 2), dtype=np.int32)
+    if graph_points.shape[0] == 0:  # 说明没有提取到道路点，自然也就无法进行推结构的推理了
+        return graph_points, np.zeros((0, 2), dtype=np.int32)
 
-    # # for box query
-    # graph_rtree = rtree.index.Index()
-    # for i, v in enumerate(graph_points):
-    #     x, y = v
-    #     # hack to insert single points
-    #     graph_rtree.insert(i, (x, y, x, y))
+    # for box query
+    graph_rtree = rtree.index.Index()
+    for i, v in enumerate(graph_points):
+        x, y = v
+        # hack to insert single points
+        graph_rtree.insert(i, (x, y, x, y))
     
-    # ## Pass 2: infer toponet to predict topology of points from stored img features
-    # edge_scores = defaultdict(float)
-    # edge_counts = defaultdict(float)
-    # for batch_index in range(batch_num):
-    #     offset = batch_index * batch_size
-    #     batch_patch_info = all_patch_info[offset : offset + batch_size]
+    ## Pass 2: infer toponet to predict topology of points from stored img features
+    edge_scores = defaultdict(float)
+    edge_counts = defaultdict(float)
+    for batch_index in range(batch_num):
+        offset = batch_index * batch_size
+        batch_patch_info = all_patch_info[offset : offset + batch_size]
 
-    #     topo_data = {
-    #         'points': [],
-    #         'pairs': [],
-    #         'valid': [],
-    #     }
-    #     idx_maps = []
+        topo_data = {
+            'points': [],
+            'pairs': [],
+            'valid': [],
+        }
+        idx_maps = []
 
 
-    #     # prepares pairs queries
-    #     for patch_info in batch_patch_info:
-    #         _, (x0, y0), (x1, y1) = patch_info
-    #         patch_point_indices = list(graph_rtree.intersection((x0, y0, x1, y1)))
-    #         idx_patch2all = {patch_idx : all_idx for patch_idx, all_idx in enumerate(patch_point_indices)}
-    #         patch_point_num = len(patch_point_indices)
-    #         # normalize into patch
-    #         patch_points = graph_points[patch_point_indices, :] - np.array([[x0, y0]], dtype=graph_points.dtype)
-    #         # for knn and circle query
-    #         patch_kdtree = scipy.spatial.KDTree(patch_points)
+        # prepares pairs queries
+        for patch_info in batch_patch_info:
+            _, (x0, y0), (x1, y1) = patch_info
+            patch_point_indices = list(graph_rtree.intersection((x0, y0, x1, y1)))
+            idx_patch2all = {patch_idx : all_idx for patch_idx, all_idx in enumerate(patch_point_indices)}
+            patch_point_num = len(patch_point_indices)
+            # normalize into patch
+            patch_points = graph_points[patch_point_indices, :] - np.array([[x0, y0]], dtype=graph_points.dtype)
+            # for knn and circle query
+            patch_kdtree = scipy.spatial.KDTree(patch_points)
 
-    #         # k+1 because the nearest one is always self
-    #         # idx is to the patch subgraph
-    #         knn_d, knn_idx = patch_kdtree.query(patch_points, k=config.MAX_NEIGHBOR_QUERIES + 1, distance_upper_bound=config.NEIGHBOR_RADIUS)
-    #         # [patch_point_num, n_nbr]
-    #         knn_idx = knn_idx[:, 1:]  # removes self
-    #         # [patch_point_num, n_nbr] idx is to the patch subgraph
-    #         src_idx = np.tile(
-    #             np.arange(patch_point_num)[:, np.newaxis],
-    #             (1, config.MAX_NEIGHBOR_QUERIES)
-    #         )
-    #         valid = knn_idx < patch_point_num
-    #         tgt_idx = np.where(valid, knn_idx, src_idx)
-    #         # [patch_point_num, n_nbr, 2]
-    #         pairs = np.stack([src_idx, tgt_idx], axis=-1)
+            # k+1 because the nearest one is always self
+            # idx is to the patch subgraph
+            knn_d, knn_idx = patch_kdtree.query(patch_points, k=config.MAX_NEIGHBOR_QUERIES + 1, distance_upper_bound=config.NEIGHBOR_RADIUS)
+            # [patch_point_num, n_nbr]
+            knn_idx = knn_idx[:, 1:]  # removes self
+            # [patch_point_num, n_nbr] idx is to the patch subgraph
+            src_idx = np.tile(
+                np.arange(patch_point_num)[:, np.newaxis],
+                (1, config.MAX_NEIGHBOR_QUERIES)
+            )
+            valid = knn_idx < patch_point_num
+            tgt_idx = np.where(valid, knn_idx, src_idx)
+            # [patch_point_num, n_nbr, 2]
+            pairs = np.stack([src_idx, tgt_idx], axis=-1)
 
-    #         topo_data['points'].append(patch_points)
-    #         topo_data['pairs'].append(pairs)
-    #         topo_data['valid'].append(valid)
-    #         idx_maps.append(idx_patch2all)
+            topo_data['points'].append(patch_points)
+            topo_data['pairs'].append(pairs)
+            topo_data['valid'].append(valid)
+            idx_maps.append(idx_patch2all)
         
-    #     # collate
-    #     collated = {}
-    #     for key, x_list in topo_data.items():
-    #         length = max([x.shape[0] for x in x_list])
-    #         collated[key] = np.stack([
-    #             np.pad(x, [(0, length - x.shape[0])] + [(0, 0)] * (len(x.shape) - 1))
-    #             for x in x_list
-    #         ], axis=0)
+        # collate
+        collated = {}
+        for key, x_list in topo_data.items():
+            length = max([x.shape[0] for x in x_list])
+            collated[key] = np.stack([
+                np.pad(x, [(0, length - x.shape[0])] + [(0, 0)] * (len(x.shape) - 1))
+                for x in x_list
+            ], axis=0)
 
-    #     # skips this batch if there's no points
-    #     if collated['points'].shape[1] == 0:
-    #         continue
+        # skips this batch if there's no points
+        if collated['points'].shape[1] == 0:
+            continue
         
-    #     # infer toponet
-    #     # [B, D, h, w]
-    #     batch_features = img_features[batch_index]
-    #     # [B, N_sample, N_pair, 2]
-    #     batch_points = torch.tensor(collated['points'], device=args.device)
-    #     batch_pairs = torch.tensor(collated['pairs'], device=args.device)
-    #     batch_valid = torch.tensor(collated['valid'], device=args.device)
+        # infer toponet
+        # [B, D, h, w]
+        batch_features = img_features[batch_index]
+        # [B, N_sample, N_pair, 2]
+        batch_points = torch.tensor(collated['points'], device=args.device)
+        batch_pairs = torch.tensor(collated['pairs'], device=args.device)
+        batch_valid = torch.tensor(collated['valid'], device=args.device)
 
-
-    #     with torch.no_grad():
-    #         # [B, N_samples, N_pairs, 1]
-    #         topo_scores = net.infer_toponet(batch_features, batch_points, batch_pairs, batch_valid)
+  
+        with torch.no_grad():
+            # [B, N_samples, N_pairs, 1]
+            topo_scores = net.infer_toponet(batch_features, batch_points, batch_pairs, batch_valid)
                 
-    #     # all-invalid (padded, no neighbors) queries returns nan scores
-    #     # [B, N_samples, N_pairs]
-    #     topo_scores = torch.where(torch.isnan(topo_scores), -100.0, topo_scores).squeeze(-1).cpu().numpy()
+        # all-invalid (padded, no neighbors) queries returns nan scores
+        # [B, N_samples, N_pairs]
+        topo_scores = torch.where(torch.isnan(topo_scores), -100.0, topo_scores).squeeze(-1).cpu().numpy()
 
-    #     # aggregate edge scores
-    #     batch_size, n_samples, n_pairs = topo_scores.shape
-    #     for bi in range(batch_size):
-    #         for si in range(n_samples):
-    #             for pi in range(n_pairs):
-    #                 if not collated['valid'][bi, si, pi]:
-    #                     continue
-    #                 # idx to the full graph
-    #                 src_idx_patch, tgt_idx_patch = collated['pairs'][bi, si, pi, :]
-    #                 src_idx_all, tgt_idx_all = idx_maps[bi][src_idx_patch], idx_maps[bi][tgt_idx_patch]
-    #                 edge_score = topo_scores[bi, si, pi]
-    #                 assert 0.0 <= edge_score <= 1.0
-    #                 edge_scores[(src_idx_all, tgt_idx_all)] += edge_score
-    #                 edge_counts[(src_idx_all, tgt_idx_all)] += 1.0
+        # aggregate edge scores
+        batch_size, n_samples, n_pairs = topo_scores.shape
+        for bi in range(batch_size):
+            for si in range(n_samples):
+                for pi in range(n_pairs):
+                    if not collated['valid'][bi, si, pi]:
+                        continue
+                    # idx to the full graph
+                    src_idx_patch, tgt_idx_patch = collated['pairs'][bi, si, pi, :]
+                    src_idx_all, tgt_idx_all = idx_maps[bi][src_idx_patch], idx_maps[bi][tgt_idx_patch]
+                    edge_score = topo_scores[bi, si, pi]
+                    assert 0.0 <= edge_score <= 1.0
+                    edge_scores[(src_idx_all, tgt_idx_all)] += edge_score
+                    edge_counts[(src_idx_all, tgt_idx_all)] += 1.0
 
-    # # avg edge scores and filter
-    # pred_edges = []
-    # for edge, score_sum in edge_scores.items():
-    #     score = score_sum / edge_counts[edge] 
-    #     if score > config.TOPO_THRESHOLD:
-    #         pred_edges.append(edge)
-    # pred_edges = np.array(pred_edges).reshape(-1, 2)
-    # pred_nodes = graph_points[:, ::-1]  # to rc
+    # avg edge scores and filter
+    pred_edges = []
+    for edge, score_sum in edge_scores.items():
+        score = score_sum / edge_counts[edge] 
+        if score > config.TOPO_THRESHOLD:
+            pred_edges.append(edge)
+    pred_edges = np.array(pred_edges).reshape(-1, 2)
+    pred_nodes = graph_points[:, ::-1]  # to rc
     
     
 
-    # return pred_nodes, pred_edges, fused_keypoint_mask
+    return pred_nodes, pred_edges, fused_keypoint_mask
     return fused_keypoint_mask
 
     

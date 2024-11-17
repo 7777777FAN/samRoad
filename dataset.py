@@ -469,7 +469,7 @@ class SatMapDataset(Dataset):
             # dx, dy的变换
             # rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
             #             [math.cos(math.pi/2), math.sin(math.pi/2)],
-            #             [-math.sin(math.pi/2), math.cos(math.pi/2)]
+            #             [-math.sin(math.pi/2), math.cos(math.pi/2)]s
             # ], dtype=np.float32)
             
             rot_mat = np.array([    # 只针对90度的旋转，如果是任意角度还需要改旋转矩阵
@@ -488,8 +488,6 @@ class SatMapDataset(Dataset):
                 for j in range(self.max_degree):    # stick back
                     GTE_patch[r, c, 1+3*j+1], GTE_patch[r, c, 1+3*j+2] = roted_coords[:, j]
                 
-                # BUG 内存不够用了，试试这能否解决
-                del delta_coords, delta_coords_to_rot, roted_coords
                     
         patch = ((begin_x, begin_y), (end_x, end_y))
         graph_points, topo_samples = self.graph_label_generators[img_idx].sample_patch(patch, rot_index)

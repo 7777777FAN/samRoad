@@ -71,7 +71,7 @@ def graphInsert(node_neighbor, n1key, n2key):
 
 
 
-def simpilifyGraph(node_neighbor, e=2.5):
+def simplifyGraph(node_neighbor, e=2.5):
 	new_graph = {}	
 
 	visited = []

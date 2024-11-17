@@ -9,7 +9,7 @@ from rtree import index
 import sys 
 import pickle 
 from common import * 
-from douglasPeucker import simpilifyGraph
+from douglasPeucker import simplifyGraph
 
 
 vector_norm = 25.0 
@@ -826,7 +826,7 @@ def DecodeAndVis(imagegraph,
 	# We also apply them to other methods in the evaluation.
 	# 
 
-	spurs_thr = 50 
+	spurs_thr = 50
 	isolated_thr = 200
 
 	# spacenet's tiles are small
@@ -969,7 +969,7 @@ def DecodeAndVis(imagegraph,
 
 
 	pickle.dump(graph, open(filename+"_graph_nosimplify.p","wb"))
-	simplified_graph = simpilifyGraph(graph)
+	simplified_graph = simplifyGraph(graph)
 	pickle.dump(simplified_graph, open(filename+"_graph_simplified.p","wb"))
 
 		
